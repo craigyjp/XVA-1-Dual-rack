@@ -286,6 +286,10 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           if (!lowerMode) {
             synthesizer->setParameterU(parameter.getNumber(0), msb);
             synthesizer->setParameterU(parameter.getNumber(1), lsb);
+            if (keyboardMode == WHOLE) {
+              synthesizer->setParameterL(parameter.getNumber(0), msb);
+              synthesizer->setParameterL(parameter.getNumber(1), lsb);
+            }
           } else {
             synthesizer->setParameterL(parameter.getNumber(0), msb);
             synthesizer->setParameterL(parameter.getNumber(1), lsb);
@@ -303,6 +307,9 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           bitWrite(value, parameter.getBitNumber(subIndex), newValue);
           if (!lowerMode) {
             synthesizer->setParameterU(parameter.getNumber(), value);
+            if (keyboardMode == WHOLE) {
+              synthesizer->setParameterL(parameter.getNumber(), value);
+            }
           } else {
             synthesizer->setParameterL(parameter.getNumber(), value);
           }
@@ -311,6 +318,9 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
       default:
         if (!lowerMode) {
           synthesizer->setParameterU(parameter.getNumber(subIndex), newValue);
+          if (keyboardMode == WHOLE) {
+            synthesizer->setParameterL(parameter.getNumber(subIndex), newValue);
+          }
         } else {
           synthesizer->setParameterL(parameter.getNumber(subIndex), newValue);
         }

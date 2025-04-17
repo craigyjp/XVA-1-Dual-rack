@@ -1,4 +1,4 @@
-#include <stdint.h> // Add this at the top if it's not already there
+#include <stdint.h>  // Add this at the top if it's not already there
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <SPI.h>
@@ -58,16 +58,20 @@ int prevPatchNumberU;
 int prevPatchNumberL;
 int activeShortcut = 0;
 bool saveMode = false;
-//bool lowerMode = false;
 
-enum KeyboardMode { WHOLE, DUAL, SPLIT };
-KeyboardMode keyboardMode = WHOLE;
 
-bool upperSW = true; // toggled by your layer select button
-int splitPoint = 60; // middle C as default, user configurable
+unsigned long menuButtonPressTime = 0;
+const unsigned long longPressThreshold = 1000;  // 1 second
+bool menuButtonHeldHandled = false;
+
+bool upperSW = true;  // toggled by your layer select button
+int splitPoint = 60;  // middle C as default, user configurable
 
 bool lowerButtonPushed = false;
 bool mainRotaryButtonPushed = false;
+bool suppressLowerDisplay = true;
+static bool toggle = false;
+uint8_t noteTarget[128] = {0};
 
 /* function prototypes */
 
@@ -112,6 +116,10 @@ ShiftRegister74HC595<1> srpanel(28, 29, 30);
 
 void setup() {
   Serial.begin(115200);
+
+  // pulup i2c pins
+  pinMode(18, INPUT_PULLUP);
+  pinMode(19, INPUT_PULLUP);
 
   //while the serial stream is not open, do nothing:
   //    while (!Serial);
@@ -177,14 +185,14 @@ void loop() {
     handleInterrupt();
   }
   MIDI.read();
-  usbMIDI.read();
+  //usbMIDI.read();
 }
 
-void myProgramChange(uint8_t  channel, uint8_t  value) {
-  if (channel == 2) {
+void myProgramChange(uint8_t channel, uint8_t value) {
+  if (channel == 1) {
     synthesizer.selectPatchU(value + 1);
   }
-  if (channel == 1) {
+  if (channel == 2) {
     synthesizer.selectPatchL(value + 1);
   }
   parameterController.setDefaultSection();
@@ -201,21 +209,14 @@ void myControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
 void myAfterTouch(uint8_t channel, uint8_t value) {
   switch (keyboardMode) {
     case WHOLE:
-      MIDI6.sendAfterTouch(value, channel);
-      MIDI8.sendAfterTouch(value, channel);
-      break;
-
     case DUAL:
       MIDI6.sendAfterTouch(value, channel);
       MIDI8.sendAfterTouch(value, channel);
       break;
 
     case SPLIT:
-      // Option 1: send to both (most expressive)
       MIDI6.sendAfterTouch(value, channel);
       MIDI8.sendAfterTouch(value, channel);
-
-      // Option 2 (optional): send only to side of last played note or based on held keys
       break;
   }
 }
@@ -223,17 +224,12 @@ void myAfterTouch(uint8_t channel, uint8_t value) {
 void DinHandlePitchBend(uint8_t channel, int pitch) {
   switch (keyboardMode) {
     case WHOLE:
-      MIDI6.sendPitchBend(pitch, channel);
-      MIDI8.sendPitchBend(pitch, channel);
-      break;
-
     case DUAL:
       MIDI6.sendPitchBend(pitch, channel);
       MIDI8.sendPitchBend(pitch, channel);
       break;
 
     case SPLIT:
-      // Optional: apply pitchbend to whichever side last received a note?
       MIDI6.sendPitchBend(pitch, channel);
       MIDI8.sendPitchBend(pitch, channel);
       break;
@@ -243,51 +239,59 @@ void DinHandlePitchBend(uint8_t channel, int pitch) {
 void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
   switch (keyboardMode) {
     case WHOLE:
-      // Simple round robin between two synths — could improve with voice usage tracking
-      static bool toggle = false;
       if (toggle) {
         MIDI6.sendNoteOn(note, velocity, channel);
+        noteTarget[note] = 6;
       } else {
         MIDI8.sendNoteOn(note, velocity, channel);
+        noteTarget[note] = 8;
       }
       toggle = !toggle;
       break;
 
     case DUAL:
-      MIDI6.sendNoteOn(note, velocity, channel); // Lower Layer
-      MIDI8.sendNoteOn(note, velocity, channel); // Upper Layer
+      MIDI6.sendNoteOn(note, velocity, channel);
+      MIDI8.sendNoteOn(note, velocity, channel);
+      noteTarget[note] = 0; // both received
       break;
 
     case SPLIT:
       if (note < splitPoint) {
-        MIDI6.sendNoteOn(note, velocity, channel); // Lower
+        MIDI6.sendNoteOn(note, velocity, channel);
+        noteTarget[note] = 6;
       } else {
-        MIDI8.sendNoteOn(note, velocity, channel); // Upper
+        MIDI8.sendNoteOn(note, velocity, channel);
+        noteTarget[note] = 8;
       }
       break;
   }
 }
 
 void myNoteOff(uint8_t channel, uint8_t note, uint8_t velocity) {
+  uint8_t target = noteTarget[note];
+
   switch (keyboardMode) {
     case WHOLE:
-      MIDI6.sendNoteOff(note, velocity, channel);
-      MIDI8.sendNoteOff(note, velocity, channel);
+    case SPLIT:
+      if (target == 6) {
+        MIDI6.sendNoteOff(note, velocity, channel);
+      } else if (target == 8) {
+        MIDI8.sendNoteOff(note, velocity, channel);
+      } else {
+        // fallback: send to both
+        MIDI6.sendNoteOff(note, velocity, channel);
+        MIDI8.sendNoteOff(note, velocity, channel);
+      }
       break;
 
     case DUAL:
       MIDI6.sendNoteOff(note, velocity, channel);
       MIDI8.sendNoteOff(note, velocity, channel);
       break;
-
-    case SPLIT:
-      if (note < splitPoint) {
-        MIDI6.sendNoteOff(note, velocity, channel);
-      } else {
-        MIDI8.sendNoteOff(note, velocity, channel);
-      }
-      break;
   }
+
+  // Clear the note tracking
+  noteTarget[note] = 0;
 }
 
 /**
@@ -353,6 +357,7 @@ void initRotaryEncoders() {
 
 void initMainScreen() {
   tft.init(240, 320);
+  //tft.useFrameBuffer(true);
   tft.setRotation(3);  // 0 & 2 Portrait. 1 & 3 landscape;
 }
 
@@ -401,54 +406,81 @@ void detachInterrupts() {
 }
 
 void handleMainEncoder(bool clockwise, int speed) {
+  // Get current patch number
   if (!lowerMode) {
     currentPatchNumber = synthesizer.getPatchNumberU();
   } else {
     currentPatchNumber = synthesizer.getPatchNumberL();
   }
+
   int oldValue = currentPatchNumber;
 
+  // Adjust patch number based on encoder direction
   if (clockwise) {
     if (currentPatchNumber < 128) {
       currentPatchNumber += speed;
-      if (currentPatchNumber > 128) {
-        currentPatchNumber = 128;
-      }
+      if (currentPatchNumber > 128) currentPatchNumber = 128;
     }
   } else {
     if (currentPatchNumber > 1) {
       currentPatchNumber -= speed;
-      if (currentPatchNumber < 1) {
-        currentPatchNumber = 1;
-      }
+      if (currentPatchNumber < 1) currentPatchNumber = 1;
     }
+  }
+
+  // Save the new patch number to the correct layer
+  if (!lowerMode) {
+    currentPatchNumberU = currentPatchNumber;
+  } else {
+    currentPatchNumberL = currentPatchNumber;
   }
 
   Serial.print("Selecting patch: ");
   Serial.println(currentPatchNumber);
+
   if (!saveMode) {
     Serial.print("Loading the patch: ");
     Serial.println(currentPatchNumber);
+
     if (currentPatchNumber != oldValue) {
       if (!lowerMode) {
-        synthesizer.selectPatchU(currentPatchNumber);
+        synthesizer.selectPatchU(currentPatchNumberU);
+
+        if (keyboardMode == WHOLE) {
+          suppressLowerDisplay = true;
+          synthesizer.setAllParameterL(currentPatchNumberU);
+          suppressLowerDisplay = false;
+        }
       } else {
-        synthesizer.selectPatchL(currentPatchNumber);
+        synthesizer.selectPatchL(currentPatchNumberL);
       }
+      // Send CC123 to both synths to clear stuck notes
+      MIDI6.sendControlChange(123, 127, 1);  // Lower synth
+      MIDI8.sendControlChange(123, 127, 1);  // Upper synth
+
       clearShortcut();
       parameterController.setDefaultSection();
       displayPatchInfo();
     }
   }
+
   if (saveMode) {
     Serial.print("Scroll through patches: ");
     Serial.println(currentPatchNumber);
+
     if (currentPatchNumber != oldValue) {
       if (!lowerMode) {
-        synthesizer.changePatchU(currentPatchNumber);
+        synthesizer.changePatchU(currentPatchNumberU);
+
+        if (keyboardMode == WHOLE) {
+          suppressLowerDisplay = true;
+          synthesizer.setAllParameterL(currentPatchNumberU);
+          suppressLowerDisplay = false;
+        }
       } else {
-        synthesizer.changePatchL(currentPatchNumber);
+        synthesizer.changePatchL(currentPatchNumberL);
       }
+
       displayPatchInfo();
     }
   }
@@ -473,29 +505,37 @@ void rtrim(std::string &s, char c) {
   s.erase(p, s.end());
 }
 
-void displayPatchInfo(bool paintItBlack) {
-  if (!lowerMode) {
-    currentPatchNumberU = synthesizer.getPatchNumberU();
-  } else {
-    currentPatchNumberL = synthesizer.getPatchNumberL();
-  }
+void sendPatchToLowerOnly(int currentPatchNumber) {
+  //String* data = getPatchDataU(patchNumber);
+  synthesizer.setAllParameterL(currentPatchNumber);
+}
 
+void displayPatchInfo(bool paintItBlack) {
   tft.setTextColor(paintItBlack ? MY_ORANGE : TFT_BLACK);
   tft.setTextSize(2);
   tft.setTextDatum(1);
+
   if (!saveMode) {
-    tft.drawString("XVA1 Synthesizer", 113, 6);
+    tft.drawString("XVA1 Synthesizer", 153, 6);
   }
+
+  // Section labels
   tft.setTextColor((paintItBlack) ? TFT_BLACK : TFT_WHITE);
   tft.drawString("Upper", 60, 40);
   tft.drawString("Patch", 60, 70);
-  tft.drawString("Lower", 60, 140);
-  tft.drawString("Patch", 60, 170);
-  tft.fillRect(0, 128, 240, 2, MY_ORANGE);
+
+  if (keyboardMode != WHOLE) {
+    tft.drawString("Lower", 60, 140);
+    tft.drawString("Patch", 60, 170);
+  }
+
+  tft.fillRect(0, 128, 320, 2, MY_ORANGE); // Divider line
+
   if (!paintItBlack) {
     tft.setTextColor(MY_ORANGE, TFT_BLACK);
   }
 
+  // Upper patch number
   tft.setTextSize(5);
   tft.setTextColor(TFT_BLACK);
   tft.drawNumber(prevPatchNumberU, 180, 50);
@@ -503,21 +543,24 @@ void displayPatchInfo(bool paintItBlack) {
   tft.drawNumber(currentPatchNumberU, 180, 50);
   prevPatchNumberU = currentPatchNumberU;
 
-  tft.setTextSize(5);
-  tft.setTextColor(TFT_BLACK);
-  tft.drawNumber(prevPatchNumberL, 180, 150);
-  tft.setTextColor(MY_ORANGE, TFT_BLACK);
-  tft.drawNumber(currentPatchNumberL, 180, 150);
-  prevPatchNumberL = currentPatchNumberL;
+  // Lower patch number (only in non-Whole modes)
+  if (keyboardMode != WHOLE) {
+    tft.setTextSize(5);
+    tft.setTextColor(TFT_BLACK);
+    tft.drawNumber(prevPatchNumberL, 180, 150);
+    tft.setTextColor(MY_ORANGE, TFT_BLACK);
+    tft.drawNumber(currentPatchNumberL, 180, 150);
+    prevPatchNumberL = currentPatchNumberL;
+  }
 
-
+  // Patch name: Upper
   tft.setTextColor(TFT_BLACK);
-  tft.setTextSize(2);
   tft.setTextSize(1);
-  tft.fillRect(0, 94, 240, 26, TFT_BLACK);
+  tft.fillRect(0, 94, 320, 26, TFT_BLACK);
   if (!paintItBlack) {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
   }
+
   string nameU = synthesizer.getPatchNameU();
   rtrim(nameU, ' ');
   tft.setTextSize(2);
@@ -526,26 +569,30 @@ void displayPatchInfo(bool paintItBlack) {
   tft.setTextDatum(0);
   tft.setTextSize(1);
 
+  // Patch name: Lower (only if not in Whole mode)
   tft.setTextColor(TFT_BLACK);
-  tft.setTextSize(2);
   tft.setTextSize(1);
-  tft.fillRect(0, 191, 240, 26, TFT_BLACK);
+  tft.fillRect(0, 191, 320, 26, TFT_BLACK);
   if (!paintItBlack) {
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
   }
-  string nameL = synthesizer.getPatchNameL();
-  rtrim(nameL, ' ');
-  tft.setTextSize(2);
-  tft.setTextDatum(1);
-  tft.drawString(nameL.c_str(), 119, 200);
-  tft.setTextDatum(0);
-  tft.setTextSize(1);
+
+  if (keyboardMode != WHOLE) {
+    string nameL = synthesizer.getPatchNameL();
+    rtrim(nameL, ' ');
+    tft.setTextSize(2);
+    tft.setTextDatum(1);
+    tft.drawString(nameL.c_str(), 119, 200);
+    tft.setTextDatum(0);
+    tft.setTextSize(1);
+  }
 }
 
 void clearMainScreen() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextSize(1);
-  tft.fillRect(0, 0, 240, 26, MY_ORANGE);
+  tft.fillRect(0, 0, 320, 26, MY_ORANGE);
+  //tft.updateScreen();
 }
 
 void pollAllMCPs() {
@@ -601,6 +648,64 @@ void mainButtonChanged(Button *btn, bool released) {
   Serial.println((released) ? "RELEASED" : "PRESSED");
 
   switch (btn->id) {
+    case MENU_BUTTON:
+      if (!released) {
+        // Start tracking press time
+        menuButtonPressTime = millis();
+        menuButtonHeldHandled = false;
+      } else {
+        unsigned long heldTime = millis() - menuButtonPressTime;
+
+        if (heldTime >= longPressThreshold && !menuButtonHeldHandled) {
+          // === LONG PRESS DETECTED ===
+          // Add your alternate long-press action here (optional)
+          Serial.println("[MENU] Long press detected");
+          tft.fillRect(0, 0, 240, 26, TFT_NAVY);
+          tft.setTextColor(TFT_WHITE);
+          tft.setTextSize(2);
+          tft.setTextDatum(1);
+          tft.drawString("Long Press", 113, 6);
+
+          menuButtonHeldHandled = true;
+
+        } else {
+          // === SHORT PRESS DETECTED ===
+          // Cycle through keyboard modes
+          switch (keyboardMode) {
+            case WHOLE:
+              keyboardMode = DUAL;
+              Serial.println("[MODE] Switched to DUAL");
+              tft.fillRect(0, 0, 240, 26, TFT_BLUE);
+              tft.setTextColor(TFT_WHITE);
+              tft.setTextSize(2);
+              tft.setTextDatum(1);
+              tft.drawString("Dual Mode", 113, 6);
+              break;
+
+            case DUAL:
+              keyboardMode = SPLIT;
+              Serial.println("[MODE] Switched to SPLIT");
+              tft.fillRect(0, 0, 240, 26, TFT_GREEN);
+              tft.setTextColor(TFT_BLACK);
+              tft.setTextSize(2);
+              tft.setTextDatum(1);
+              tft.drawString("Split Mode", 113, 6);
+              break;
+
+            case SPLIT:
+              keyboardMode = WHOLE;
+              Serial.println("[MODE] Switched to WHOLE");
+              tft.fillRect(0, 0, 240, 26, TFT_ORANGE);
+              tft.setTextColor(TFT_BLACK);
+              tft.setTextSize(2);
+              tft.setTextDatum(1);
+              tft.drawString("Whole Mode", 113, 6);
+              break;
+          }
+        }
+      }
+      break;
+
     case LOWER_BUTTON:
       if (!released)
         lowerButtonPushed = !lowerButtonPushed;
@@ -648,22 +753,22 @@ void mainButtonChanged(Button *btn, bool released) {
           tft.drawString("Writing Patch", 113, 6);
           if (!lowerMode) {
             int currentPatchNumber = synthesizer.getPatchNumberU();
-            synthesizer.setAllParameterU(currentPatchNumberU, currentPatchNumberU);
+            synthesizer.setAllParameterU(currentPatchNumberU);
             synthesizer.savePatchDataU(currentPatchNumberU);
             delay(1000);
             displayPatchInfo();
           } else {
             int currentPatchNumber = synthesizer.getPatchNumberL();
-            synthesizer.setAllParameterL(currentPatchNumberL, currentPatchNumberL);
+            synthesizer.setAllParameterL(currentPatchNumberL);
             synthesizer.savePatchDataL(currentPatchNumberL);
             delay(1000);
             displayPatchInfo();
           }
-          tft.fillRect(0, 0, 240, 26, MY_ORANGE);
+          tft.fillRect(0, 0, 320, 26, MY_ORANGE);
           tft.setTextSize(2);
           tft.setTextDatum(1);
           tft.setTextColor(TFT_BLACK);
-          tft.drawString("XVA1 Synthesizer", 113, 6);
+          tft.drawString("XVA1 Synthesizer", 153, 6);
           srpanel.set(SAVE_LED, LOW);
         }
       }

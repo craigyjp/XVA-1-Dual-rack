@@ -231,7 +231,7 @@ uint8_t Synthesizer::getParameterL(int number) const {
 // test transfer of patch upper
 //
 
-void Synthesizer::setAllParameterU(int number, int value) {
+void Synthesizer::setAllParameterU(int number) {
   Serial.println("Writing all patch data to upper Synth...");
   Serial.println(number);
   HWSERIAL5.flush();
@@ -264,7 +264,7 @@ void Synthesizer::setAllParameterU(int number, int value) {
 // test transfer of patch lower
 //
 
-void Synthesizer::setAllParameterL(int number, int value) {
+void Synthesizer::setAllParameterL(int number) {
   Serial.println("Writing all patch data to lower Synth...");
   Serial.println(number);
   HWSERIAL4.flush();
@@ -317,8 +317,6 @@ void Synthesizer::setParameterU(int number, int value) {
     setCurrentPatchNameU();
   }
 }
-
-
 
 //
 // SETS PARAMETER FOR LOWER SYNTH

@@ -54,9 +54,9 @@ public:
 
   uint8_t getParameterL(int number) const;
 
-  void setAllParameterU(int number, int value);
+  void setAllParameterU(int number);
 
-  void setAllParameterL(int number, int value);
+  void setAllParameterL(int number);
 
   void setParameterU(int number, int value);
 

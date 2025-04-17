@@ -1,0 +1,1 @@
+![Synth](Photos/Synth.jpg)

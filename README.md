@@ -14,4 +14,4 @@ The main issue was that I built it originally with a Teensy 3.6 soldered to the 
 
 I've already created some case artwork for the front panel but then I added larger display for the main display, 320*240.
 
-So far I've got both XVA-1's playing notes in 64 voice polyphonic modes, clumsy as I have to recall both upper an lower sounds manually to the same patch.
+Setups are Whole mode, Dual mode and Split mode accessed by the MENU button, press and hold menu for more than 500mS and you can press a key and set a split point that will be stored in memory and recalled on boot.

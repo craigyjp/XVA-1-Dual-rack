@@ -16,83 +16,6 @@
 #include "global.h"
 #include <EEPROM.h>
 
-#define EEPROM_SPLITPOINT_ADDR 0
-
-#define TFT_GREY 0x5AEB
-#define MY_ORANGE 0xFBA0
-#define TFT_BLACK 0x0000       /*   0,   0,   0 */
-#define TFT_NAVY 0x000F        /*   0,   0, 128 */
-#define TFT_DARKGREEN 0x03E0   /*   0, 128,   0 */
-#define TFT_DARKCYAN 0x03EF    /*   0, 128, 128 */
-#define TFT_MAROON 0x7800      /* 128,   0,   0 */
-#define TFT_PURPLE 0x780F      /* 128,   0, 128 */
-#define TFT_OLIVE 0x7BE0       /* 128, 128,   0 */
-#define TFT_LIGHTGREY 0xD69A   /* 211, 211, 211 */
-#define TFT_DARKGREY 0x7BEF    /* 128, 128, 128 */
-#define TFT_BLUE 0x001F        /*   0,   0, 255 */
-#define TFT_GREEN 0x07E0       /*   0, 255,   0 */
-#define TFT_CYAN 0x07FF        /*   0, 255, 255 */
-#define TFT_RED 0xF800         /* 255,   0,   0 */
-#define TFT_MAGENTA 0xF81F     /* 255,   0, 255 */
-#define TFT_YELLOW 0xFFE0      /* 255, 255,   0 */
-#define TFT_WHITE 0xFFFF       /* 255, 255, 255 */
-#define TFT_ORANGE 0xFDA0      /* 255, 180,   0 */
-#define TFT_GREENYELLOW 0xB7E0 /* 180, 255,   0 */
-#define TFT_PINK 0xFE19        /* 255, 192, 203 */
-#define TFT_BROWN 0x9A60       /* 150,  75,   0 */
-#define TFT_GOLD 0xFEA0        /* 255, 215,   0 */
-#define TFT_SILVER 0xC618      /* 192, 192, 192 */
-#define TFT_SKYBLUE 0x867D     /* 135, 206, 235 */
-#define TFT_VIOLET 0x915C      /* 180,  46, 226 */
-
-#define SAVE_LED 0
-#define LOWER_LED 3
-#define MENU_LED 1
-#define ESCAPE_LED 2
-
-// Variable to indicate that an interrupt has occurred
-boolean awokeByInterrupt = false;
-
-unsigned long lastTransition[9];
-int currentPatchNumber;
-int currentPatchNumberU = 1;
-int currentPatchNumberL = 1;
-int prevPatchNumberU;
-int prevPatchNumberL;
-int activeShortcut = 0;
-bool saveMode = false;
-
-// setting split up
-bool settingSplitPoint = false;
-unsigned long splitSetStartTime = 0;
-uint8_t splitPoint = 60; // default
-const char* noteName(uint8_t note) {
-  static const char* names[] = {
-    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
-  };
-  static char buf[5]; // enough for "C#10\0"
-
-  int octave = (note / 12) - 1;         // MIDI note 60 = C4
-  int noteIndex = note % 12;
-
-  snprintf(buf, sizeof(buf), "%s%d", names[noteIndex], octave);
-  return buf;
-}
-
-unsigned long menuButtonPressTime = 0;
-const unsigned long longPressThreshold = 1000;  // 1 second
-bool menuButtonHeldHandled = false;
-
-bool upperSW = true;  // toggled by your layer select button
-
-bool lowerButtonPushed = false;
-bool mainRotaryButtonPushed = false;
-bool suppressLowerDisplay = true;
-static bool toggle = false;
-uint8_t noteTarget[128] = { 0 };
-
-
-
 /* function prototypes */
 
 void handleMainEncoder(bool clockwise, int speed);
@@ -208,17 +131,6 @@ void loop() {
   }
   MIDI.read();
   //usbMIDI.read();
-}
-
-void loadSplitPointFromEEPROM() {
-  uint8_t value = EEPROM.read(EEPROM_SPLITPOINT_ADDR);
-  if (value >= 21 && value <= 108) {  // basic sanity range (A0 to C8)
-    splitPoint = value;
-  }
-}
-
-void saveSplitPointToEEPROM(uint8_t value) {
-  EEPROM.write(EEPROM_SPLITPOINT_ADDR, value);
 }
 
 void myProgramChange(uint8_t channel, uint8_t value) {

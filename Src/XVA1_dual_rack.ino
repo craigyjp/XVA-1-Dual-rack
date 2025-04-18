@@ -14,6 +14,9 @@
 #include <MIDI.h>
 #include <ShiftRegister74HC595.h>
 #include "global.h"
+#include <EEPROM.h>
+
+#define EEPROM_SPLITPOINT_ADDR 0
 
 #define TFT_GREY 0x5AEB
 #define MY_ORANGE 0xFBA0
@@ -59,19 +62,36 @@ int prevPatchNumberL;
 int activeShortcut = 0;
 bool saveMode = false;
 
+// setting split up
+bool settingSplitPoint = false;
+unsigned long splitSetStartTime = 0;
+uint8_t splitPoint = 60; // default
+const char* noteName(uint8_t note) {
+  static const char* names[] = {
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+  };
+  static char buf[5]; // enough for "C#10\0"
+
+  int octave = (note / 12) - 1;         // MIDI note 60 = C4
+  int noteIndex = note % 12;
+
+  snprintf(buf, sizeof(buf), "%s%d", names[noteIndex], octave);
+  return buf;
+}
 
 unsigned long menuButtonPressTime = 0;
 const unsigned long longPressThreshold = 1000;  // 1 second
 bool menuButtonHeldHandled = false;
 
 bool upperSW = true;  // toggled by your layer select button
-int splitPoint = 60;  // middle C as default, user configurable
 
 bool lowerButtonPushed = false;
 bool mainRotaryButtonPushed = false;
 bool suppressLowerDisplay = true;
 static bool toggle = false;
-uint8_t noteTarget[128] = {0};
+uint8_t noteTarget[128] = { 0 };
+
+
 
 /* function prototypes */
 
@@ -155,6 +175,8 @@ void setup() {
   MIDI8.begin();
   MIDI8.turnThruOn(midi::Thru::Mode::Off);
 
+  loadSplitPointFromEEPROM();
+
   mcp1.begin(0);
   mcp2.begin(1);
   mcp3.begin(2);
@@ -186,6 +208,17 @@ void loop() {
   }
   MIDI.read();
   //usbMIDI.read();
+}
+
+void loadSplitPointFromEEPROM() {
+  uint8_t value = EEPROM.read(EEPROM_SPLITPOINT_ADDR);
+  if (value >= 21 && value <= 108) {  // basic sanity range (A0 to C8)
+    splitPoint = value;
+  }
+}
+
+void saveSplitPointToEEPROM(uint8_t value) {
+  EEPROM.write(EEPROM_SPLITPOINT_ADDR, value);
 }
 
 void myProgramChange(uint8_t channel, uint8_t value) {
@@ -237,6 +270,28 @@ void DinHandlePitchBend(uint8_t channel, int pitch) {
 }
 
 void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
+
+  if (settingSplitPoint) {
+    splitPoint = note;
+    saveSplitPointToEEPROM(splitPoint);
+    settingSplitPoint = false;
+
+    Serial.print("[SPLIT] Split point set to: ");
+    Serial.println(splitPoint);
+
+    // Flash confirmation
+    tft.fillRect(0, 0, 320, 26, TFT_GREEN);
+    tft.setTextColor(TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setTextDatum(1);
+    tft.drawString("Split Set: " + String(noteName(note)), 153, 6);
+
+    // Wait a moment then restore header
+    delay(1000);
+    showModeLabel();
+    return;
+  }
+
   switch (keyboardMode) {
     case WHOLE:
       if (toggle) {
@@ -252,7 +307,7 @@ void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
     case DUAL:
       MIDI6.sendNoteOn(note, velocity, channel);
       MIDI8.sendNoteOn(note, velocity, channel);
-      noteTarget[note] = 0; // both received
+      noteTarget[note] = 0;  // both received
       break;
 
     case SPLIT:
@@ -516,7 +571,7 @@ void displayPatchInfo(bool paintItBlack) {
   tft.setTextDatum(1);
 
   if (!saveMode) {
-    tft.drawString("XVA1 Synthesizer", 153, 6);
+    showModeLabel();
   }
 
   // Section labels
@@ -529,7 +584,7 @@ void displayPatchInfo(bool paintItBlack) {
     tft.drawString("Patch", 60, 170);
   }
 
-  tft.fillRect(0, 128, 320, 2, MY_ORANGE); // Divider line
+  tft.fillRect(0, 128, 320, 2, MY_ORANGE);  // Divider line
 
   if (!paintItBlack) {
     tft.setTextColor(MY_ORANGE, TFT_BLACK);
@@ -585,6 +640,9 @@ void displayPatchInfo(bool paintItBlack) {
     tft.drawString(nameL.c_str(), 119, 200);
     tft.setTextDatum(0);
     tft.setTextSize(1);
+  } else {
+    // optionally clear lower label area if needed
+    tft.fillRect(0, 140, 320, 80, TFT_BLACK);  // Clear lower patch section
   }
 }
 
@@ -656,50 +714,57 @@ void mainButtonChanged(Button *btn, bool released) {
       } else {
         unsigned long heldTime = millis() - menuButtonPressTime;
 
-        if (heldTime >= longPressThreshold && !menuButtonHeldHandled) {
-          // === LONG PRESS DETECTED ===
-          // Add your alternate long-press action here (optional)
-          Serial.println("[MENU] Long press detected");
-          tft.fillRect(0, 0, 240, 26, TFT_NAVY);
+        // === SPLIT MODE: SET SPLIT POINT ===
+        if (keyboardMode == SPLIT && heldTime >= 500 && !menuButtonHeldHandled) {
+          Serial.println("[SPLIT] Entering split point set mode");
+          settingSplitPoint = true;
+          menuButtonHeldHandled = true;
+
+          // Flash message
+          tft.fillRect(0, 0, 320, 26, TFT_RED);
           tft.setTextColor(TFT_WHITE);
           tft.setTextSize(2);
           tft.setTextDatum(1);
-          tft.drawString("Long Press", 113, 6);
+          tft.drawString("Press Note to Set Split", 153, 6);
+          return; // Skip normal mode cycle
+        }
 
-          menuButtonHeldHandled = true;
-
-        } else {
-          // === SHORT PRESS DETECTED ===
-          // Cycle through keyboard modes
+        // === NORMAL SHORT PRESS: CYCLE MODES ===
+        if (!menuButtonHeldHandled) {
           switch (keyboardMode) {
             case WHOLE:
               keyboardMode = DUAL;
               Serial.println("[MODE] Switched to DUAL");
-              tft.fillRect(0, 0, 240, 26, TFT_BLUE);
-              tft.setTextColor(TFT_WHITE);
-              tft.setTextSize(2);
-              tft.setTextDatum(1);
-              tft.drawString("Dual Mode", 113, 6);
+
+              if (currentPatchNumberL < 1 || currentPatchNumberL > 128) {
+                currentPatchNumberL = 1;
+              }
+              synthesizer.selectPatchL(currentPatchNumberL);
+              displayPatchInfo();
               break;
 
             case DUAL:
               keyboardMode = SPLIT;
               Serial.println("[MODE] Switched to SPLIT");
-              tft.fillRect(0, 0, 240, 26, TFT_GREEN);
-              tft.setTextColor(TFT_BLACK);
-              tft.setTextSize(2);
-              tft.setTextDatum(1);
-              tft.drawString("Split Mode", 113, 6);
+              displayPatchInfo();
               break;
 
             case SPLIT:
               keyboardMode = WHOLE;
               Serial.println("[MODE] Switched to WHOLE");
-              tft.fillRect(0, 0, 240, 26, TFT_ORANGE);
-              tft.setTextColor(TFT_BLACK);
-              tft.setTextSize(2);
-              tft.setTextDatum(1);
-              tft.drawString("Whole Mode", 113, 6);
+
+              // Force exit lower mode
+              lowerMode = false;
+              lowerButtonPushed = false;
+              srpanel.set(LOWER_LED, LOW);
+
+              // Load upper patch and send to lower synth
+              synthesizer.selectPatchU(currentPatchNumberU);
+              suppressLowerDisplay = true;
+              synthesizer.setAllParameterL(currentPatchNumberU);
+              suppressLowerDisplay = false;
+
+              displayPatchInfo();
               break;
           }
         }
@@ -707,27 +772,33 @@ void mainButtonChanged(Button *btn, bool released) {
       break;
 
     case LOWER_BUTTON:
-      if (!released)
+      if (!released) {
+        if (keyboardMode == WHOLE) {
+          Serial.println("[INFO] Lower button ignored in WHOLE mode");
+          return;
+        }
         lowerButtonPushed = !lowerButtonPushed;
+      }
+
       if (lowerButtonPushed) {
         srpanel.set(LOWER_LED, HIGH);
         lowerMode = true;
         if (!saveMode) {
           synthesizer.selectPatchL(currentPatchNumberL);
           parameterController.setDefaultSection();
-          //synthesizer.loadPatchDataL();
         }
       }
+
       if (!lowerButtonPushed) {
         srpanel.set(LOWER_LED, LOW);
         lowerMode = false;
         if (!saveMode) {
           synthesizer.selectPatchU(currentPatchNumberU);
           parameterController.setDefaultSection();
-          //synthesizer.loadPatchDataU();
         }
       }
       break;
+
     case SAVE_BUTTON:
       if (!released) {
         saveMode = !saveMode;
@@ -738,41 +809,37 @@ void mainButtonChanged(Button *btn, bool released) {
             displayPatchInfo();
           }
           srpanel.set(SAVE_LED, HIGH);
-          tft.fillRect(0, 0, 240, 26, TFT_VIOLET);
+          tft.fillRect(0, 0, 320, 26, TFT_VIOLET);
           tft.setTextColor(TFT_WHITE);
           tft.setTextSize(2);
           tft.setTextDatum(1);
-          tft.drawString("Select Location", 113, 6);
+          tft.drawString("Select Location", 153, 6);
           parameterController.setDefaultSection();
-        }
-        if (!saveMode) {
+        } else {
           tft.setTextSize(2);
           tft.setTextDatum(1);
-          tft.fillRect(0, 0, 240, 26, TFT_RED);
+          tft.fillRect(0, 0, 320, 26, TFT_RED);
           tft.setTextColor(TFT_WHITE);
-          tft.drawString("Writing Patch", 113, 6);
+          tft.drawString("Writing Patch", 153, 6);
+
           if (!lowerMode) {
             int currentPatchNumber = synthesizer.getPatchNumberU();
             synthesizer.setAllParameterU(currentPatchNumberU);
             synthesizer.savePatchDataU(currentPatchNumberU);
-            delay(1000);
-            displayPatchInfo();
           } else {
             int currentPatchNumber = synthesizer.getPatchNumberL();
             synthesizer.setAllParameterL(currentPatchNumberL);
             synthesizer.savePatchDataL(currentPatchNumberL);
-            delay(1000);
-            displayPatchInfo();
           }
-          tft.fillRect(0, 0, 320, 26, MY_ORANGE);
-          tft.setTextSize(2);
-          tft.setTextDatum(1);
-          tft.setTextColor(TFT_BLACK);
-          tft.drawString("XVA1 Synthesizer", 153, 6);
+
+          delay(1000);
+          displayPatchInfo();
+          showModeLabel();
           srpanel.set(SAVE_LED, LOW);
         }
       }
       break;
+
     case ESC_BUTTON:
       if (!released) {
         if (activeShortcut > 0) {
@@ -780,8 +847,9 @@ void mainButtonChanged(Button *btn, bool released) {
           clearShortcut();
           displayPatchInfo();
         }
+
         if (saveMode) {
-          saveMode = !saveMode;
+          saveMode = false;
           tft.fillRect(0, 160, 240, 26, TFT_BLACK);
           parameterController.clearScreen();
           clearShortcut();
@@ -791,7 +859,41 @@ void mainButtonChanged(Button *btn, bool released) {
 
         parameterController.setDefaultSection();
       }
+      break;
   }
+}
+
+void showModeLabel() {
+  tft.fillRect(0, 0, 320, 26, TFT_BLACK); // Clear old label area
+  tft.setTextSize(2);
+  tft.setTextDatum(1); // Center text
+  tft.setTextColor(TFT_WHITE);
+
+  String label;
+
+  switch (keyboardMode) {
+    case WHOLE:
+      tft.fillRect(0, 0, 320, 26, TFT_ORANGE);
+      tft.setTextColor(TFT_BLACK);
+      label = "Whole Mode";
+      break;
+
+    case DUAL:
+      tft.fillRect(0, 0, 320, 26, TFT_BLUE);
+      tft.setTextColor(TFT_WHITE);
+      label = "Dual Mode";
+      break;
+
+    case SPLIT:
+      tft.fillRect(0, 0, 320, 26, TFT_GREEN);
+      tft.setTextColor(TFT_BLACK);
+      label = "Split Mode (";
+      label += noteName(splitPoint);
+      label += ")";
+      break;
+  }
+
+  tft.drawString(label, 160, 6); // Centered on screen
 }
 
 void clearShortcut() {

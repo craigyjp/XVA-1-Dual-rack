@@ -14,4 +14,6 @@ The main issue was that I built it originally with a Teensy 3.6 soldered to the 
 
 I've already created some case artwork for the front panel but then I added larger display for the main display, 320*240.
 
-Setups are Whole mode, Dual mode and Split mode accessed by the MENU button, press and hold menu for more than 500mS and you can press a key and set a split point that will be stored in memory and recalled on boot.
+Recently I added two more buttons and this gave me a MODE button and a PATCH/PERF button to switch between the two modes.
+
+Setups are Whole mode, Dual mode and Split mode accessed by the MODE button, press and hold MODE for more than 500mS and you can press a key and set a split point that will be stored in memory and recalled on boot.

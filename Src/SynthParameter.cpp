@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 04/04/2021.
-//
-
 #include "SynthParameter.h"
 
 SynthParameter::SynthParameter(std::string name) {
@@ -33,10 +29,8 @@ uint8_t SynthParameter::getBitNumber(int index) const {
 }
 
 int SynthParameter::getNumber(int index) const {
-    if (index < _numbers.size()) {
-        return _numbers[index];
-    }
-
+    if (_numbers.empty()) return -1;
+    if (index < _numbers.size()) return _numbers[index];
     return _numbers[0];
 }
 

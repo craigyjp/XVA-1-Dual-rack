@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 06/04/2021.
-//
-
 #include "Section.h"
 
 Section::Section(string name) : _name(name) {}

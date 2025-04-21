@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 30/04/2021.
-//
-
 #ifndef XVA1USERINTERFACE_ENVELOPE_H
 #define XVA1USERINTERFACE_ENVELOPE_H
 

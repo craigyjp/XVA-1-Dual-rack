@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 24/03/2021.
-//
-
 #include "Button.h"
 
 /*

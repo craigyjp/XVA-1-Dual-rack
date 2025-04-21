@@ -2,12 +2,9 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <SPI.h>
-#include <ST7735_t3.h>  // Hardware-specific library
 #include <ST7789_t3.h>  // Hardware-specific library
-#include <st7735_t3_font_Arial.h>
 #include <Wire.h>
 #include <Adafruit_SSD1306.h>
-#include <Adafruit_I2CDevice.h>
 #include "SynthParameter.h"
 #include "Button.h"
 #include "Hardware.h"
@@ -15,6 +12,7 @@
 #include <ShiftRegister74HC595.h>
 #include "global.h"
 #include <EEPROM.h>
+#include <Encoder.h>
 
 /* function prototypes */
 
@@ -23,9 +21,6 @@ void handleMainEncoder(bool clockwise, int speed);
 void initOLEDDisplays();
 
 void pollAllMCPs();
-
-//void IRAM_ATTR interruptCallback();
-void interruptCallback();
 
 void displayPatchInfo();
 
@@ -47,33 +42,26 @@ void readMainRotaryButton();
 
 void readMainRotaryEncoder();
 
-void handleInterrupt();
-
-void attachInterrupts();
-
-void detachInterrupts();
-
 int getEncoderSpeed(int id);
 
 ShiftRegister74HC595<1> srpanel(28, 29, 30);
 
 void setup() {
   Serial.begin(115200);
+  // if (!SD.begin(BUILTIN_SDCARD)) {
+  //   Serial.println("SD card initialization failed!");
+  // } else {
+  //   Serial.println("SD card ready.");
+  // }
 
-  // pulup i2c pins
+  // pullup i2c pins
   pinMode(18, INPUT_PULLUP);
   pinMode(19, INPUT_PULLUP);
 
-  //while the serial stream is not open, do nothing:
-  //    while (!Serial);
-
-  Serial.println("\n");
-  Serial.println("===================");
-  Serial.println("XVA1 User Interface");
-  Serial.println("===================\n");
+  mainEncoder.write(0);  // Resets encoder count to 0 on startup
 
   //MIDI 5 Pin DIN
-  MIDI.begin();
+  MIDI.begin(MIDI_CHANNEL_OMNI);
   MIDI.setHandleControlChange(myControlChange);
   MIDI.setHandleProgramChange(myProgramChange);
   MIDI.setHandleAfterTouchChannel(myAfterTouch);
@@ -81,7 +69,6 @@ void setup() {
   MIDI.setHandleNoteOn(myNoteOn);
   MIDI.setHandleNoteOff(myNoteOff);
   MIDI.turnThruOn(midi::Thru::Mode::Off);
-  Serial.println("MIDI In DIN Listening");
 
   //USB Client MIDI
   usbMIDI.setHandleControlChange(myControlChange);
@@ -90,7 +77,6 @@ void setup() {
   usbMIDI.setHandlePitchChange(DinHandlePitchBend);
   usbMIDI.setHandleNoteOn(myNoteOn);
   usbMIDI.setHandleNoteOff(myNoteOff);
-  Serial.println("USB Client MIDI Listening");
 
   MIDI6.begin();
   MIDI6.turnThruOn(midi::Thru::Mode::Off);
@@ -100,11 +86,21 @@ void setup() {
 
   loadSplitPointFromEEPROM();
 
+  Wire.begin();
+  Wire.setClock(100000);  // Slow down I2C to 100kHz
+
   mcp1.begin(0);
+  delay(10);
   mcp2.begin(1);
+  delay(10);
   mcp3.begin(2);
+  delay(10);
   mcp4.begin(3);
+  delay(10);
   mcp5.begin(4);
+  delay(10);
+  mcp6.begin(5);
+  delay(10);
 
   synthesizer.begin();
 
@@ -112,13 +108,17 @@ void setup() {
   clearMainScreen();
 
   initRotaryEncoders();
+  delay(10);
   initOLEDDisplays();
   initButtons();
 
-  attachInterrupts();
+  srpanel.set(UPPER_LED, HIGH);
+  srpanel.set(LOWER_LED, LOW);
 
   synthesizer.selectPatchU(1);
   synthesizer.selectPatchL(1);
+  parameterController.setDefaultSection();
+  delay(10);
   parameterController.setDefaultSection();
   displayPatchInfo();
 }
@@ -126,20 +126,50 @@ void setup() {
 void loop() {
   pollAllMCPs();
 
-  if (awokeByInterrupt) {
-    handleInterrupt();
-  }
+  readMainRotaryEncoder();
+
   MIDI.read();
-  //usbMIDI.read();
+  usbMIDI.read();
+}
+
+void readMainRotaryEncoder() {
+  static int lastDetentPos = 0;
+  int rawPos = mainEncoder.read();
+  int detentPos = rawPos / 4;
+
+  if (detentPos != lastDetentPos) {
+    bool clockwise = (detentPos > lastDetentPos);
+    int speed = abs(detentPos - lastDetentPos);
+    handleMainEncoder(clockwise, speed);
+    lastDetentPos = detentPos;
+  }
 }
 
 void myProgramChange(uint8_t channel, uint8_t value) {
-  if (channel == 1) {
-    synthesizer.selectPatchU(value + 1);
+
+  int patchNum = value + 1;  // MIDI programs 0–127 → patches 1–128
+
+  if (keyboardMode == WHOLE) {
+    if (channel == 1) {
+      // WHOLE: Load upper, mirror to lower
+      currentPatchNumberU = patchNum;
+      synthesizer.selectPatchU(currentPatchNumberU);
+      suppressLowerDisplay = true;
+      synthesizer.setAllParameterL(currentPatchNumberU);
+      suppressLowerDisplay = false;
+    }
   }
-  if (channel == 2) {
-    synthesizer.selectPatchL(value + 1);
+
+  else {  // DUAL or SPLIT
+    if (channel == 1) {
+      currentPatchNumberU = patchNum;
+      synthesizer.selectPatchU(currentPatchNumberU);
+    } else if (channel == 2) {
+      currentPatchNumberL = patchNum;
+      synthesizer.selectPatchL(currentPatchNumberL);
+    }
   }
+
   parameterController.setDefaultSection();
   parameterController.clearScreen();
   clearShortcut();
@@ -187,9 +217,6 @@ void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
     splitPoint = note;
     saveSplitPointToEEPROM(splitPoint);
     settingSplitPoint = false;
-
-    Serial.print("[SPLIT] Split point set to: ");
-    Serial.println(splitPoint);
 
     // Flash confirmation
     tft.fillRect(0, 0, 320, 26, TFT_GREEN);
@@ -266,27 +293,51 @@ void myNoteOff(uint8_t channel, uint8_t note, uint8_t velocity) {
    All work will be done from the main loop, to avoid watchdog errors
 */
 
+// void loadPerformance(int index) {
+//   char path[32];
+//   snprintf(path, sizeof(path), "/perf/P%03d.dat", index);
 
-void interruptCallback() {
-  awokeByInterrupt = true;
-}
+//   File file = SD.open(path);
+//   if (file && file.read((uint8_t*)&currentPerformance, sizeof(Performance)) == sizeof(Performance)) {
+//     currentPatchNumberU = currentPerformance.upperPatchNo;
+//     currentPatchNumberL = currentPerformance.lowerPatchNo;
+//     keyboardMode = (KeyboardMode)currentPerformance.keyboardMode;
+//     splitPoint = currentPerformance.splitPoint;
 
-void readMainRotaryEncoder() {
-  unsigned char result = mainRotaryEncoder.process();
-  if (result) {
-    int speed = getEncoderSpeed(0);
+//     synthesizer.selectPatchU(currentPatchNumberU);
+//     synthesizer.selectPatchL(currentPatchNumberL);
 
-    bool clockwise = result == DIR_CW;
-    if (activeShortcut != 0) {
-      bool consumed = parameterController.rotaryEncoderChanged(0, clockwise, 1);
-      if (!consumed) {
-        handleMainEncoder(clockwise, speed);
-      }
-    } else {
-      handleMainEncoder(clockwise, speed);
-    }
-  }
-}
+//     if (keyboardMode == WHOLE) {
+//       suppressLowerDisplay = true;
+//       synthesizer.setAllParameterL(currentPatchNumberU);
+//       suppressLowerDisplay = false;
+//     }
+
+//     Serial.printf("[PERF] Loaded: %s (U:%d L:%d)\n",
+//                   currentPerformance.name,
+//                   currentPatchNumberU,
+//                   currentPatchNumberL);
+//   }
+//   file.close();
+// }
+
+// void saveCurrentPerformance(int index) {
+//   Performance perf;
+//   perf.upperPatchNo = currentPatchNumberU;
+//   perf.lowerPatchNo = currentPatchNumberL;
+//   perf.keyboardMode = keyboardMode;
+//   perf.splitPoint = splitPoint;
+//   strncpy(perf.name, "New Performance", 17); // Replace with actual name editing later
+
+//   char path[32];
+//   snprintf(path, sizeof(path), "/perf/P%03d.dat", index);
+//   File file = SD.open(path, FILE_WRITE);
+//   if (file) {
+//     file.write((uint8_t*)&perf, sizeof(Performance));
+//     file.close();
+//     Serial.println("[PERF] Saved.");
+//   }
+// }
 
 void rotaryEncoderChanged(bool clockwise, int id) {
   int speed = getEncoderSpeed(id);
@@ -319,7 +370,7 @@ void initRotaryEncoders() {
     rotaryEncoder.init();
   }
 
-  mainRotaryEncoder.begin(true);
+  //mainRotaryEncoder.begin(true);
 }
 
 void initMainScreen() {
@@ -346,30 +397,6 @@ void initButtons() {
   }
 
   pinMode(MAIN_ROTARY_BTN_PIN, INPUT_PULLUP);
-}
-
-void handleInterrupt() {
-  // Disable interrupts while handling them
-  detachInterrupts();
-
-  readMainRotaryButton();
-  readMainRotaryEncoder();
-
-  // Enable interrupts again
-  awokeByInterrupt = false;
-  attachInterrupts();
-}
-
-void attachInterrupts() {
-  attachInterrupt(MAIN_ROTARY_BTN_PIN, interruptCallback, CHANGE);
-  attachInterrupt(MAIN_ROTARY_ENCODER_PIN_A, interruptCallback, CHANGE);
-  attachInterrupt(MAIN_ROTARY_ENCODER_PIN_B, interruptCallback, CHANGE);
-}
-
-void detachInterrupts() {
-  detachInterrupt(MAIN_ROTARY_BTN_PIN);
-  detachInterrupt(MAIN_ROTARY_ENCODER_PIN_A);
-  detachInterrupt(MAIN_ROTARY_ENCODER_PIN_B);
 }
 
 void handleMainEncoder(bool clockwise, int speed) {
@@ -402,12 +429,8 @@ void handleMainEncoder(bool clockwise, int speed) {
     currentPatchNumberL = currentPatchNumber;
   }
 
-  Serial.print("Selecting patch: ");
-  Serial.println(currentPatchNumber);
 
   if (!saveMode) {
-    Serial.print("Loading the patch: ");
-    Serial.println(currentPatchNumber);
 
     if (currentPatchNumber != oldValue) {
       if (!lowerMode) {
@@ -432,8 +455,6 @@ void handleMainEncoder(bool clockwise, int speed) {
   }
 
   if (saveMode) {
-    Serial.print("Scroll through patches: ");
-    Serial.println(currentPatchNumber);
 
     if (currentPatchNumber != oldValue) {
       if (!lowerMode) {
@@ -473,7 +494,6 @@ void rtrim(std::string &s, char c) {
 }
 
 void sendPatchToLowerOnly(int currentPatchNumber) {
-  //String* data = getPatchDataU(patchNumber);
   synthesizer.setAllParameterL(currentPatchNumber);
 }
 
@@ -587,20 +607,13 @@ void pollAllMCPs() {
 }
 
 void shortcutButtonChanged(Button *btn, bool released) {
-  Serial.print("Shortcut-button #");
-  Serial.print(btn->id);
-  Serial.print(" ");
-  Serial.println((released) ? "RELEASED" : "PRESSED");
-
   if (!released) {
     if (activeShortcut > 0) {
       parameterController.clearScreen();
     }
 
-    activeShortcut = (lowerButtonPushed && btn->id <= 4) ? btn->id + 8 : btn->id;
+    activeShortcut = btn->id;  // Same section in upper and lower mode
 
-    Serial.print("Active Shortcut: ");
-    Serial.println(activeShortcut);
     for (auto &shortcutButton : shortcutButtons) {
       shortcutButton->setLED(shortcutButton->id == btn->id);
     }
@@ -612,25 +625,41 @@ void shortcutButtonChanged(Button *btn, bool released) {
 }
 
 void mainButtonChanged(Button *btn, bool released) {
-  Serial.print("Main-button #");
-  Serial.print(btn->id);
-  Serial.print(" ");
-  Serial.println((released) ? "RELEASED" : "PRESSED");
 
   switch (btn->id) {
-    case MENU_BUTTON:
+
+      // case PERF_BUTTON:
+      //   if (!released) {
+      //     inPerformanceMode = !inPerformanceMode;
+
+      //     if (inPerformanceMode) {
+      //       srpanel.set(PERF_LED, HIGH);
+      //       srpanel.set(PATCH_LED, LOW);
+      //       loadPerformance(performanceIndex);
+      //     } else {
+      //       srpanel.set(PERF_LED, LOW);
+      //       srpanel.set(PATCH_LED, HIGH);
+      //       synthesizer.selectPatchU(currentPatchNumberU);
+      //       synthesizer.selectPatchL(currentPatchNumberL);
+      //     }
+
+      //     displayPatchInfo();
+      //   }
+      //   break;
+
+    case MODE_BUTTON:
       if (!released) {
         // Start tracking press time
-        menuButtonPressTime = millis();
-        menuButtonHeldHandled = false;
+        modeButtonPressTime = millis();
+        modeButtonHeldHandled = false;
       } else {
-        unsigned long heldTime = millis() - menuButtonPressTime;
+        unsigned long heldTime = millis() - modeButtonPressTime;
 
         // === SPLIT MODE: SET SPLIT POINT ===
-        if (keyboardMode == SPLIT && heldTime >= 500 && !menuButtonHeldHandled) {
-          Serial.println("[SPLIT] Entering split point set mode");
+        if (keyboardMode == SPLIT && heldTime >= 500 && !modeButtonHeldHandled) {
+
           settingSplitPoint = true;
-          menuButtonHeldHandled = true;
+          modeButtonHeldHandled = true;
 
           // Flash message
           tft.fillRect(0, 0, 320, 26, TFT_RED);
@@ -638,15 +667,14 @@ void mainButtonChanged(Button *btn, bool released) {
           tft.setTextSize(2);
           tft.setTextDatum(1);
           tft.drawString("Press Note to Set Split", 153, 6);
-          return; // Skip normal mode cycle
+          return;  // Skip normal mode cycle
         }
 
         // === NORMAL SHORT PRESS: CYCLE MODES ===
-        if (!menuButtonHeldHandled) {
+        if (!modeButtonHeldHandled) {
           switch (keyboardMode) {
             case WHOLE:
               keyboardMode = DUAL;
-              Serial.println("[MODE] Switched to DUAL");
 
               if (currentPatchNumberL < 1 || currentPatchNumberL > 128) {
                 currentPatchNumberL = 1;
@@ -657,18 +685,17 @@ void mainButtonChanged(Button *btn, bool released) {
 
             case DUAL:
               keyboardMode = SPLIT;
-              Serial.println("[MODE] Switched to SPLIT");
               displayPatchInfo();
               break;
 
             case SPLIT:
               keyboardMode = WHOLE;
-              Serial.println("[MODE] Switched to WHOLE");
 
               // Force exit lower mode
               lowerMode = false;
               lowerButtonPushed = false;
               srpanel.set(LOWER_LED, LOW);
+              srpanel.set(UPPER_LED, HIGH);
 
               // Load upper patch and send to lower synth
               synthesizer.selectPatchU(currentPatchNumberU);
@@ -686,24 +713,26 @@ void mainButtonChanged(Button *btn, bool released) {
     case LOWER_BUTTON:
       if (!released) {
         if (keyboardMode == WHOLE) {
-          Serial.println("[INFO] Lower button ignored in WHOLE mode");
+
           return;
         }
         lowerButtonPushed = !lowerButtonPushed;
       }
 
       if (lowerButtonPushed) {
-        srpanel.set(LOWER_LED, HIGH);
         lowerMode = true;
+        srpanel.set(LOWER_LED, HIGH);  // Activate lower LED
+        srpanel.set(UPPER_LED, LOW);   // Deactivate upper LED
+
         if (!saveMode) {
           synthesizer.selectPatchL(currentPatchNumberL);
           parameterController.setDefaultSection();
         }
-      }
-
-      if (!lowerButtonPushed) {
-        srpanel.set(LOWER_LED, LOW);
+      } else {
         lowerMode = false;
+        srpanel.set(LOWER_LED, LOW);   // Deactivate lower LED
+        srpanel.set(UPPER_LED, HIGH);  // Activate upper LED
+
         if (!saveMode) {
           synthesizer.selectPatchU(currentPatchNumberU);
           parameterController.setDefaultSection();
@@ -735,11 +764,11 @@ void mainButtonChanged(Button *btn, bool released) {
           tft.drawString("Writing Patch", 153, 6);
 
           if (!lowerMode) {
-            int currentPatchNumber = synthesizer.getPatchNumberU();
+            currentPatchNumber = synthesizer.getPatchNumberU();
             synthesizer.setAllParameterU(currentPatchNumberU);
             synthesizer.savePatchDataU(currentPatchNumberU);
           } else {
-            int currentPatchNumber = synthesizer.getPatchNumberL();
+            currentPatchNumber = synthesizer.getPatchNumberL();
             synthesizer.setAllParameterL(currentPatchNumberL);
             synthesizer.savePatchDataL(currentPatchNumberL);
           }
@@ -762,7 +791,7 @@ void mainButtonChanged(Button *btn, bool released) {
 
         if (saveMode) {
           saveMode = false;
-          tft.fillRect(0, 160, 240, 26, TFT_BLACK);
+          tft.fillRect(0, 160, 320, 26, TFT_BLACK);
           parameterController.clearScreen();
           clearShortcut();
           displayPatchInfo();
@@ -776,9 +805,9 @@ void mainButtonChanged(Button *btn, bool released) {
 }
 
 void showModeLabel() {
-  tft.fillRect(0, 0, 320, 26, TFT_BLACK); // Clear old label area
+  tft.fillRect(0, 0, 320, 26, TFT_BLACK);  // Clear old label area
   tft.setTextSize(2);
-  tft.setTextDatum(1); // Center text
+  tft.setTextDatum(1);  // Center text
   tft.setTextColor(TFT_WHITE);
 
   String label;
@@ -788,12 +817,16 @@ void showModeLabel() {
       tft.fillRect(0, 0, 320, 26, TFT_ORANGE);
       tft.setTextColor(TFT_BLACK);
       label = "Whole Mode";
+      srpanel.set(MODE_RED_LED, LOW);
+      srpanel.set(MODE_GREEN_LED, LOW);
       break;
 
     case DUAL:
-      tft.fillRect(0, 0, 320, 26, TFT_BLUE);
+      tft.fillRect(0, 0, 320, 26, TFT_RED);
       tft.setTextColor(TFT_WHITE);
       label = "Dual Mode";
+      srpanel.set(MODE_RED_LED, HIGH);
+      srpanel.set(MODE_GREEN_LED, LOW);
       break;
 
     case SPLIT:
@@ -802,10 +835,12 @@ void showModeLabel() {
       label = "Split Mode (";
       label += noteName(splitPoint);
       label += ")";
+      srpanel.set(MODE_RED_LED, LOW);
+      srpanel.set(MODE_GREEN_LED, HIGH);
       break;
   }
 
-  tft.drawString(label, 160, 6); // Centered on screen
+  tft.drawString(label, 160, 6);  // Centered on screen
 }
 
 void clearShortcut() {
@@ -824,17 +859,9 @@ void readMainRotaryButton() {
 }
 
 void rotaryButtonChanged(Button *btn, bool released) {
-  Serial.print("Rotary-button #");
-  Serial.print(btn->id);
-  Serial.print(" ");
-  Serial.println((released) ? "RELEASED" : "PRESSED");
 }
 
 void upOrDownButtonChanged(Button *btn, bool released) {
-  Serial.print((btn->id == UP_BUTTON) ? "Up" : "Down");
-  Serial.print("-button");
-  Serial.print(" ");
-  Serial.println((released) ? "RELEASED" : "PRESSED");
 
   if (!released) {
     if (btn->id == UP_BUTTON) {
@@ -846,6 +873,4 @@ void upOrDownButtonChanged(Button *btn, bool released) {
 }
 
 void mainRotaryButtonChanged(bool released) {
-  Serial.print("MAIN-Rotary-button ");
-  Serial.println((released) ? "RELEASED" : "PRESSED");
 }

@@ -6,8 +6,8 @@
 #include "Synthesizer.h"
 int read_status;
 
-#define HWSERIAL5 Serial4
-#define HWSERIAL4 Serial5
+#define HWSERIAL4 Serial4
+#define HWSERIAL3 Serial3
 
 //
 // READ PATCH N FROM UPPER SYNTH
@@ -20,16 +20,16 @@ void Synthesizer::selectPatchU(int number) {
   Serial.print(synthPatchNumber);
   Serial.print(" on Synth...");
 
-  HWSERIAL5.write('r');  // 'r' = Read program
-  HWSERIAL5.write(synthPatchNumber);
+  HWSERIAL3.write('r');  // 'r' = Read program
+  HWSERIAL3.write(synthPatchNumber);
 
 
 
   int bytesRead = 0;
   int retry = 0;
   while (bytesRead == 0 && retry != 100) {
-    if (HWSERIAL5.available()) {
-      read_status = HWSERIAL5.read();
+    if (HWSERIAL3.available()) {
+      read_status = HWSERIAL3.read();
       bytesRead++;
       retry = 0;
     } else {
@@ -94,7 +94,7 @@ void Synthesizer::changePatchL(int number) {
 //
 
 void Synthesizer::loadPatchDataU() {
-  HWSERIAL5.write('d');  // 'd' = Display program
+  HWSERIAL3.write('d');  // 'd' = Display program
 
   Serial.println("Reading patch data from Synth...");
 
@@ -102,8 +102,8 @@ void Synthesizer::loadPatchDataU() {
   int bytesRead = 0;
   int retry = 0;
   while (bytesRead != 512 && retry != 100) {
-    if (HWSERIAL5.available()) {
-      uint8_t b = HWSERIAL5.read();
+    if (HWSERIAL3.available()) {
+      uint8_t b = HWSERIAL3.read();
       rxBuffer[bytesRead] = b;
       bytesRead++;
       retry = 0;
@@ -112,7 +112,7 @@ void Synthesizer::loadPatchDataU() {
       delay(1);
     }
   }
-  HWSERIAL5.flush();
+  HWSERIAL3.flush();
   memcpy(currentPatchData, rxBuffer, 512);
   setCurrentPatchNameU();
 }
@@ -154,8 +154,8 @@ void Synthesizer::savePatchDataU(int number) {
 
   Serial.println("Writing patch data from Synth...");
   Serial.println(number);
-  HWSERIAL5.write('w');  // 'w' = Write program
-  HWSERIAL5.write(synthPatchNumber);
+  HWSERIAL3.write('w');  // 'w' = Write program
+  HWSERIAL3.write(synthPatchNumber);
 }
 
 //
@@ -234,22 +234,22 @@ uint8_t Synthesizer::getParameterL(int number) const {
 void Synthesizer::setAllParameterU(int number) {
   Serial.println("Writing all patch data to upper Synth...");
   Serial.println(number);
-  HWSERIAL5.flush();
+  HWSERIAL3.flush();
   uint8_t txBuffer[512];
   memcpy(txBuffer, currentPatchData, 512);
   int bytesSent = 0;
   int retry = 0;
   while (bytesSent != 512 && retry != 100) {
-      HWSERIAL5.write('s');  // 's' = Set Parameter
+      HWSERIAL3.write('s');  // 's' = Set Parameter
 
       if (bytesSent > 255) {
         // Parameters above 255 have a two-byte format: b1 = 255, b2 = x-256
-        HWSERIAL5.write(255);
-        HWSERIAL5.write(bytesSent - 256);
-        HWSERIAL5.write(txBuffer[bytesSent]);
+        HWSERIAL3.write(255);
+        HWSERIAL3.write(bytesSent - 256);
+        HWSERIAL3.write(txBuffer[bytesSent]);
       } else {
-        HWSERIAL5.write(bytesSent);
-        HWSERIAL5.write(txBuffer[bytesSent]);
+        HWSERIAL3.write(bytesSent);
+        HWSERIAL3.write(txBuffer[bytesSent]);
       }
       // Serial.println("patch data to upper Synth...");
       // Serial.println(bytesSent);
@@ -299,16 +299,16 @@ void Synthesizer::setAllParameterL(int number) {
 //
 
 void Synthesizer::setParameterU(int number, int value) {
-  HWSERIAL5.write('s');  // 's' = Set Parameter
+  HWSERIAL3.write('s');  // 's' = Set Parameter
 
   if (number > 255) {
     // Parameters above 255 have a two-byte format: b1 = 255, b2 = x-256
-    HWSERIAL5.write(255);
-    HWSERIAL5.write(number - 256);
-    HWSERIAL5.write(value);
+    HWSERIAL3.write(255);
+    HWSERIAL3.write(number - 256);
+    HWSERIAL3.write(value);
   } else {
-    HWSERIAL5.write(number);
-    HWSERIAL5.write(value);
+    HWSERIAL3.write(number);
+    HWSERIAL3.write(value);
   }
 
   currentPatchData[number] = value;
@@ -343,7 +343,7 @@ void Synthesizer::setParameterL(int number, int value) {
 }
 
 void Synthesizer::begin() {
-  HWSERIAL5.begin(500000, SERIAL_8N1);  // XVA1 Serial
+  HWSERIAL3.begin(500000, SERIAL_8N1);  // XVA1 Serial
   HWSERIAL4.begin(500000, SERIAL_8N1);  // XVA1 Serial
 }
 

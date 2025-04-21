@@ -109,6 +109,7 @@ void Adafruit_MCP23017::begin(uint8_t addr) {
 	i2caddr = addr;
 
 	Wire.begin();
+	Wire.setClock(100000); 
 
 	// set defaults!
 	// all inputs on port A and B

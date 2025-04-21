@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 16/04/2021.
-//
-
 #ifndef XVA1USERINTERFACE_SECTIONFACTORY_H
 #define XVA1USERINTERFACE_SECTIONFACTORY_H
 

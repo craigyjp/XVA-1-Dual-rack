@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 08/04/2021.
-//
-
 #include <Wire.h>
 #include "Multiplexer.h"
 

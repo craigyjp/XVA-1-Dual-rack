@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 16/04/2021.
-//
-
 #include "SectionFactory.h"
 #include "SynthParameter.h"
 
@@ -26,16 +22,12 @@ Section SectionFactory::createDefaultSection() {
             .addParameter(
                     SynthParameter("ARP Tempo")
                             .number(451)
-//                            .min(50) // TODO: Also allow 0 to follow incoming MIDI clock tempo
+                        //  .min(50) // TODO: Also allow 0 to follow incoming MIDI clock tempo
             )
             //4
-            .addParameter(
-                    SynthParameter("Multiplier").number(453).min(1)
-            )
+            .addParameter(SynthParameter("Multiplier").number(453).min(1))
             //12
-            .addParameter(
-                    SynthParameter("Octaves").number(454).max(10)
-            )
+            .addParameter(SynthParameter("Octaves").number(454).max(10))
             //5
             .addParameter(
                     SynthParameter("Sequencer")
@@ -46,16 +38,8 @@ Section SectionFactory::createDefaultSection() {
             //13
             .addParameter(SynthParameter("Sequencer Tempo").number(431))
             //6
-            .addParameter(
-                    SynthParameter("Legato Mode")
-                            .number(244)
-                            .max(1)
-                            .descriptions({" Polyphonic ", "Monophonic/Legato"})
-            )
-            //14
-            .addParameter(SynthParameter("Tuning").number(251))
             //7
-                        .addParameter(
+            .addParameter(
                     SynthParameter("Glide")
                             .number(245)
                             .max(2)
@@ -64,6 +48,14 @@ Section SectionFactory::createDefaultSection() {
             //15
             .addParameter(SynthParameter("Glide Time").number(246))
             //8
+                        .addParameter(
+                    SynthParameter("Legato Mode")
+                            .number(244)
+                            .max(1)
+                            .descriptions({" Polyphonic ", "Monophonic/Legato"})
+            )
+            //14
+            .addParameter(SynthParameter("Tuning").number(251))
             .addParameter(
                     SynthParameter("Transpose")
                             .type(CENTER_128)
@@ -148,7 +140,7 @@ Section SectionFactory::createOscillatorSection() {
             //8
             .addParameter(SynthParameter("PMS").numbers({63, 64, 65, 66}))
             //16
-            .addParameter(SynthParameter("AMS").numbers({67, 66, 67, 68}))   
+            .addParameter(SynthParameter("AMS").numbers({67, 68, 69, 70}))   
                          
             // page 2
             //1

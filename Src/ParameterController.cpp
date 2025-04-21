@@ -1,39 +1,8 @@
-//
-// Created by André Mathlener on 08/04/2021.
-//
-
 #include <sstream>
 
 #include "ParameterController.h"
 #include "AllSynthParameters.h"
 #include "global.h"
-
-#define TFT_GREY 0x5AEB
-#define MY_ORANGE 0xFBA0
-#define TFT_BLACK 0x0000       /*   0,   0,   0 */
-#define TFT_NAVY 0x000F        /*   0,   0, 128 */
-#define TFT_DARKGREEN 0x03E0   /*   0, 128,   0 */
-#define TFT_DARKCYAN 0x03EF    /*   0, 128, 128 */
-#define TFT_MAROON 0x7800      /* 128,   0,   0 */
-#define TFT_PURPLE 0x780F      /* 128,   0, 128 */
-#define TFT_OLIVE 0x7BE0       /* 128, 128,   0 */
-#define TFT_LIGHTGREY 0xD69A   /* 211, 211, 211 */
-#define TFT_DARKGREY 0x7BEF    /* 128, 128, 128 */
-#define TFT_BLUE 0x001F        /*   0,   0, 255 */
-#define TFT_GREEN 0x07E0       /*   0, 255,   0 */
-#define TFT_CYAN 0x07FF        /*   0, 255, 255 */
-#define TFT_RED 0xF800         /* 255,   0,   0 */
-#define TFT_MAGENTA 0xF81F     /* 255,   0, 255 */
-#define TFT_YELLOW 0xFFE0      /* 255, 255,   0 */
-#define TFT_WHITE 0xFFFF       /* 255, 255, 255 */
-#define TFT_ORANGE 0xFDA0      /* 255, 180,   0 */
-#define TFT_GREENYELLOW 0xB7E0 /* 180, 255,   0 */
-#define TFT_PINK 0xFE19        /* 255, 192, 203 */
-#define TFT_BROWN 0x9A60       /* 150,  75,   0 */
-#define TFT_GOLD 0xFEA0        /* 255, 215,   0 */
-#define TFT_SILVER 0xC618      /* 192, 192, 192 */
-#define TFT_SKYBLUE 0x867D     /* 135, 206, 235 */
-#define TFT_VIOLET 0x915C      /* 180,  46, 226 */
 
 ParameterController::ParameterController(Synthesizer *synthesizer, Multiplexer *multiplexer, ST7789_t3 *tft,
                                          Adafruit_SSD1306 *display, LEDButton *upButton, LEDButton *downButton)
@@ -104,8 +73,9 @@ void ParameterController::setActivePage(int pageNumber) {
 
   int start = (pageNumber * 16);
   int end = start + 15;
-  if (end > getSubSection()->getParameters().size() - 1) {
-    end = getSubSection()->getParameters().size() - 1;
+  int maxIndex = (int)getSubSection()->getParameters().size() - 1;
+  if (end > maxIndex) {
+    end = maxIndex;
   }
 
   int i = start;
@@ -113,6 +83,32 @@ void ParameterController::setActivePage(int pageNumber) {
     parameterIndex = (i <= end && !getSubSection()->getParameters().at(i).getName().empty()) ? i : -1;
     i++;
   }
+
+// Serial.println("=== Parameter Indices Mapping ===");
+// for (int i = 0; i < 16; i++) {
+//   Serial.print("Encoder ");
+//   Serial.print(i + 1);
+//   Serial.print(" → parameterIndices[");
+//   Serial.print(i);
+//   Serial.print("] = ");
+//   Serial.println(parameterIndices[i]);
+// }
+
+// for (int i = 0; i < 16; i++) {
+//   int pIndex = parameterIndices[i];
+//   if (pIndex >= 0) {
+//     auto& param = getSubSection()->getParameters()[pIndex];
+//     Serial.print("Param ");
+//     Serial.print(pIndex);
+//     Serial.print(": name=");
+//     Serial.print(param.getName().c_str());
+//     Serial.print(" number=");
+//     Serial.print(param.getNumber());
+//     Serial.print(" type=");
+//     Serial.println(param.getType());
+//   }
+// }
+
   displayActivePage();
   displayParameters();
 }
@@ -188,6 +184,8 @@ bool ParameterController::rotaryEncoderButtonChanged(int id, bool released) {
 }
 
 void ParameterController::handleParameterChange(int index, bool clockwise, int speed) {
+
+
   SynthParameter parameter = getSubSection()->getParameters()[index];
   int currentValue;
 
@@ -219,13 +217,6 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           value = synthesizer->getParameterL(parameter.getNumber());
         }
         currentValue = bitRead(value, parameter.getBitNumber(subIndex));
-
-        Serial.print("Byte value: ");
-        Serial.println(value);
-        Serial.print("Bit-nr: ");
-        Serial.println(parameter.getBitNumber(subIndex));
-        Serial.print("Bit value: ");
-        Serial.println(currentValue);
 
         break;
       }
@@ -301,6 +292,9 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           int value;
           if (!lowerMode) {
             value = synthesizer->getParameterU(parameter.getNumber());
+              if (keyboardMode == WHOLE) {
+                value = synthesizer->getParameterL(parameter.getNumber());
+              }
           } else {
             value = synthesizer->getParameterL(parameter.getNumber());
           }
@@ -326,6 +320,16 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
         }
     }
   }
+
+// Serial.print("Param ");
+// Serial.print(parameter.getName().c_str());
+// Serial.print(" [");
+// Serial.print(parameter.getNumber(subIndex));
+// Serial.print("] changed from ");
+// Serial.print(currentValue);
+// Serial.print(" to ");
+// Serial.println(newValue);
+
 }
 
 void ParameterController::displayTwinParameters(int index1, int index2, int displayNumber) {
@@ -483,7 +487,7 @@ string ParameterController::getDisplayValue(int parameterIndex) {
     };
 
     if (printValue.empty()) {
-      if (value < parameter.getDescriptions().size()) {
+      if (value >= 0 && (size_t)value < parameter.getDescriptions().size()) {
         printValue = parameter.getDescriptions()[value];
       } else {
         printValue = to_string(value);
@@ -508,13 +512,10 @@ void ParameterController::displaySubSections() {
 }
 
 void ParameterController::displaySubSections(bool paintItBlack) {
-  Serial.print("displaySubSections(");
-  Serial.print((paintItBlack) ? "true" : "false");
-  Serial.println(")");
 
   tft->fillScreen(TFT_BLACK);
   tft->setTextSize(1);
-  tft->fillRect(0, 0, 240, 26, MY_ORANGE);
+  tft->fillRect(0, 0, 320, 26, MY_ORANGE);
   tft->setTextSize(2);
 
   tft->setTextColor(paintItBlack ? MY_ORANGE : TFT_BLACK);
@@ -666,7 +667,7 @@ void ParameterController::displayEnvelope(const Envelope &env, uint16_t color) {
 }
 
 void ParameterController::clearEnvelopes() {
-  tft->fillRect(0, 120, 240, 120, TFT_BLACK);
+  tft->fillRect(0, 120, 320, 120, TFT_BLACK);
 }
 
 void ParameterController::displayEnvelopesTask(void *parameter) {

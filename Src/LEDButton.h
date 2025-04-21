@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 02/04/2021.
-//
-
 #ifndef XVA1USERINTERFACE_LEDBUTTON_H
 #define XVA1USERINTERFACE_LEDBUTTON_H
 

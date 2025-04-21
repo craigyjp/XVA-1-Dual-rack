@@ -1,7 +1,3 @@
-//
-// Created by André Mathlener on 02/04/2021.
-//
-
 #include "LEDButton.h"
 
 LEDButton::LEDButton(Adafruit_MCP23017 *mcp, uint8_t buttonPin, uint8_t ledPin, int id, onActionFunction actionFunc)

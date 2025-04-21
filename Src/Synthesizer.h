@@ -13,14 +13,14 @@ using namespace std;
 
 class Synthesizer {
 private:
+
   int currentPatchNumber = 1;
   int currentPatchNumberU = 1;
   int currentPatchNumberL = 1;
-  string currentPatchName = "";
-  string currentPatchNameU = "";
-  string currentPatchNameL = "";
+  std::string currentPatchName = "";
+  std::string currentPatchNameU = "";
+  std::string currentPatchNameL = "";
   uint8_t currentPatchData[512] = {};
-  //byte currentPatchData[512] = {};
 
 public:
 

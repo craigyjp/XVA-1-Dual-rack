@@ -15,15 +15,21 @@ bool saveMode = false;
 bool settingSplitPoint = false;
 unsigned long splitSetStartTime = 0;
 uint8_t splitPoint = 60;
-unsigned long menuButtonPressTime = 0;
+unsigned long modeButtonPressTime = 0;
 const unsigned long longPressThreshold = 1000;
-bool menuButtonHeldHandled = false;
+bool modeButtonHeldHandled = false;
 bool upperSW = true;
 bool lowerButtonPushed = false;
 bool mainRotaryButtonPushed = false;
 bool suppressLowerDisplay = true;
 bool toggle = false;
-uint8_t noteTarget[128] = {0};
+EXTMEM uint8_t noteTarget[128] = {0};
+
+// #include "Performance.h"
+
+// bool inPerformanceMode = false;
+// int performanceIndex = 0;
+// Performance currentPerformance;
 
 const char* noteName(uint8_t note) {
   static const char* names[] = {

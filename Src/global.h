@@ -36,9 +36,13 @@
 
 // Panel LED identifiers
 #define SAVE_LED 0
-#define LOWER_LED 3
 #define MENU_LED 1
-#define ESCAPE_LED 2
+#define LOWER_LED 2
+#define UPPER_LED 3
+#define MODE_RED_LED 4
+#define MODE_GREEN_LED 5
+#define PATCH_LED 6
+#define PERF_LED 7
 
 // Keyboard modes
 enum KeyboardMode { WHOLE, DUAL, SPLIT };
@@ -58,15 +62,21 @@ extern bool saveMode;
 extern bool settingSplitPoint;
 extern unsigned long splitSetStartTime;
 extern uint8_t splitPoint;
-extern unsigned long menuButtonPressTime;
+extern unsigned long modeButtonPressTime;
 extern const unsigned long longPressThreshold;
-extern bool menuButtonHeldHandled;
+extern bool modeButtonHeldHandled;
 extern bool upperSW;
 extern bool lowerButtonPushed;
 extern bool mainRotaryButtonPushed;
 extern bool suppressLowerDisplay;
 extern bool toggle;
 extern uint8_t noteTarget[128];
+
+// #include "Performance.h"
+
+// extern bool inPerformanceMode;
+// extern int performanceIndex;
+// extern Performance currentPerformance;
 
 // Function declarations
 const char* noteName(uint8_t note);

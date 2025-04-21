@@ -1,13 +1,8 @@
-//
-// Created by André Mathlener on 24/03/2021.
-//
-
 #ifndef XVA1USERINTERFACE_BUTTON_H
 #define XVA1USERINTERFACE_BUTTON_H
 
 
 #include "Adafruit_MCP23017.h"
-//#include <Arduino.h>
 
 class Button {
 public:

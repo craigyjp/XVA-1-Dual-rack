@@ -32,7 +32,7 @@ EXTMEM uint8_t noteTarget[128] = {0};
 // Performance currentPerformance;
 
 const char* noteName(uint8_t note) {
-  static const char* names[] = {
+  FLASHMEM static const char* names[] = {
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
   };
   static char buf[5];

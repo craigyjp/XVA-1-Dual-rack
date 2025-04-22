@@ -96,7 +96,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
   #define TFT_MOSI      11  //a12
   #define TFT_SCK       13  //a13
   
-ST7789_t3 tft = ST7789_t3(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCK, TFT_RST);
+DMAMEM ST7789_t3 tft = ST7789_t3(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCK, TFT_RST);
 
 Encoder mainEncoder(MAIN_ROTARY_ENCODER_PIN_A, MAIN_ROTARY_ENCODER_PIN_B);
 int32_t lastEncoderValue = -999;

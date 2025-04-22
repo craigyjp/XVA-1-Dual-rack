@@ -140,7 +140,16 @@ void readMainRotaryEncoder() {
   if (detentPos != lastDetentPos) {
     bool clockwise = (detentPos > lastDetentPos);
     int speed = abs(detentPos - lastDetentPos);
-    handleMainEncoder(clockwise, speed);
+
+    if (activeShortcut != 0) {
+      bool consumed = parameterController.rotaryEncoderChanged(0, clockwise, 1);
+      if (!consumed) {
+        handleMainEncoder(clockwise, speed);
+      }
+    } else {
+      handleMainEncoder(clockwise, speed);
+    }
+
     lastDetentPos = detentPos;
   }
 }
@@ -384,7 +393,6 @@ void initOLEDDisplays() {
     multiplexer.selectChannel(d);
     // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-
     display.setTextWrap(false);
     display.clearDisplay();
     display.display();

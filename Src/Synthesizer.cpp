@@ -1,8 +1,3 @@
-//
-// Created by André Mathlener on 07/04/2021.
-//
-
-
 #include "Synthesizer.h"
 int read_status;
 

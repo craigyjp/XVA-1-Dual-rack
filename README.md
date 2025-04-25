@@ -17,3 +17,9 @@ I've already created some case artwork for the front panel but then I added larg
 Recently I added two more buttons and this gave me a MODE button and a PATCH/PERF button to switch between the two modes.
 
 Setups are Whole mode, Dual mode and Split mode accessed by the MODE button, press and hold MODE for more than 500mS and you can press a key and set a split point that will be stored in memory and recalled on boot.
+
+Performances can also be named upto 15 characters when in performance mode using the Naming Page
+
+![Synth](Photos/Synth1.jpg)
+
+![Synth](Photos/Synth2.jpg)

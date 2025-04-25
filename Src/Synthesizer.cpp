@@ -54,8 +54,6 @@ void Synthesizer::selectPatchL(int number) {
   HWSERIAL4.write('r');  // 'r' = Read program
   HWSERIAL4.write(synthPatchNumber);
 
-
-
   int bytesRead = 0;
   int retry = 0;
   while (bytesRead == 0 && retry != 100) {
@@ -93,13 +91,12 @@ void Synthesizer::loadPatchDataU() {
 
   Serial.println("Reading patch data from Synth...");
 
-  uint8_t rxBuffer[512];
   int bytesRead = 0;
   int retry = 0;
   while (bytesRead != 512 && retry != 100) {
     if (HWSERIAL3.available()) {
       uint8_t b = HWSERIAL3.read();
-      rxBuffer[bytesRead] = b;
+      currentPatchData[bytesRead] = b;
       bytesRead++;
       retry = 0;
     } else {
@@ -108,7 +105,6 @@ void Synthesizer::loadPatchDataU() {
     }
   }
   HWSERIAL3.flush();
-  memcpy(currentPatchData, rxBuffer, 512);
   setCurrentPatchNameU();
 }
 
@@ -121,13 +117,12 @@ void Synthesizer::loadPatchDataL() {
 
   Serial.println("Reading patch data from Synth...");
 
-  uint8_t rxBuffer[512];
   int bytesRead = 0;
   int retry = 0;
   while (bytesRead != 512 && retry != 100) {
     if (HWSERIAL4.available()) {
       uint8_t b = HWSERIAL4.read();
-      rxBuffer[bytesRead] = b;
+      currentPatchData[bytesRead] = b;
       bytesRead++;
       retry = 0;
     } else {
@@ -136,7 +131,6 @@ void Synthesizer::loadPatchDataL() {
     }
   }
   HWSERIAL4.flush();
-  memcpy(currentPatchData, rxBuffer, 512);
   setCurrentPatchNameL();
 }
 
@@ -230,8 +224,6 @@ void Synthesizer::setAllParameterU(int number) {
   Serial.println("Writing all patch data to upper Synth...");
   Serial.println(number);
   HWSERIAL3.flush();
-  uint8_t txBuffer[512];
-  memcpy(txBuffer, currentPatchData, 512);
   int bytesSent = 0;
   int retry = 0;
   while (bytesSent != 512 && retry != 100) {
@@ -241,14 +233,11 @@ void Synthesizer::setAllParameterU(int number) {
         // Parameters above 255 have a two-byte format: b1 = 255, b2 = x-256
         HWSERIAL3.write(255);
         HWSERIAL3.write(bytesSent - 256);
-        HWSERIAL3.write(txBuffer[bytesSent]);
+        HWSERIAL3.write(currentPatchData[bytesSent]);
       } else {
         HWSERIAL3.write(bytesSent);
-        HWSERIAL3.write(txBuffer[bytesSent]);
+        HWSERIAL3.write(currentPatchData[bytesSent]);
       }
-      // Serial.println("patch data to upper Synth...");
-      // Serial.println(bytesSent);
-      // Serial.println(txBuffer[bytesSent]);
       bytesSent++;
       retry = 0;
   }
@@ -263,8 +252,6 @@ void Synthesizer::setAllParameterL(int number) {
   Serial.println("Writing all patch data to lower Synth...");
   Serial.println(number);
   HWSERIAL4.flush();
-  uint8_t txBuffer[512];
-  memcpy(txBuffer, currentPatchData, 512);
   int bytesSent = 0;
   int retry = 0;
   while (bytesSent != 512 && retry != 100) {
@@ -275,14 +262,11 @@ void Synthesizer::setAllParameterL(int number) {
       // Parameters above 255 have a two-byte format: b1 = 255, b2 = x-256
       HWSERIAL4.write(255);
       HWSERIAL4.write(bytesSent - 256);
-      HWSERIAL4.write(txBuffer[bytesSent]);
+      HWSERIAL4.write(currentPatchData[bytesSent]);
     } else {
       HWSERIAL4.write(bytesSent);
-      HWSERIAL4.write(txBuffer[bytesSent]);
+      HWSERIAL4.write(currentPatchData[bytesSent]);
     }
-    // Serial.println("patch data to lower Synth...");
-    // Serial.println(bytesSent);
-    // Serial.println(txBuffer[bytesSent]);
     bytesSent++;
     retry = 0;
   }

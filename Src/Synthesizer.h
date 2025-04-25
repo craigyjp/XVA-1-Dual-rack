@@ -67,6 +67,9 @@ public:
   void setCurrentPatchNameL();
 
   Envelope getEnvelopeValues(Envelope &envelope);
+
+  uint8_t* getCurrentPatchData() { return currentPatchData; }
+  
 };
 
 

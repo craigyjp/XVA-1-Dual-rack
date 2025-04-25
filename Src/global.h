@@ -2,9 +2,14 @@
 #define GLOBAL_H
 
 #include <Arduino.h>
+#pragma once
+
+#include "Performance.h"  // brings in externs
 
 // EEPROM split point address
 #define EEPROM_SPLITPOINT_ADDR 0
+#define EEPROM_ADDR_MIDI_CHANNEL  4000
+#define EEPROM_ADDR_SPLIT_TRANSPOSE 4001
 
 // TFT color definitions
 #define TFT_GREY 0x5AEB
@@ -47,6 +52,7 @@
 // Keyboard modes
 enum KeyboardMode { WHOLE, DUAL, SPLIT };
 extern KeyboardMode keyboardMode;
+extern KeyboardMode previousKeyboardMode;
 extern bool lowerMode;
 
 // Global variables
@@ -62,6 +68,9 @@ extern bool saveMode;
 extern bool settingSplitPoint;
 extern unsigned long splitSetStartTime;
 extern uint8_t splitPoint;
+extern bool splitPointChanged;
+extern int splitTranspose;
+extern bool splitTransposeChanged;
 extern unsigned long modeButtonPressTime;
 extern const unsigned long longPressThreshold;
 extern bool modeButtonHeldHandled;
@@ -71,12 +80,6 @@ extern bool mainRotaryButtonPushed;
 extern bool suppressLowerDisplay;
 extern bool toggle;
 extern uint8_t noteTarget[128];
-
-// #include "Performance.h"
-
-// extern bool inPerformanceMode;
-// extern int performanceIndex;
-// extern Performance currentPerformance;
 
 // Function declarations
 const char* noteName(uint8_t note);

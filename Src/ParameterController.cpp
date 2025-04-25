@@ -84,31 +84,6 @@ void ParameterController::setActivePage(int pageNumber) {
     i++;
   }
 
-// Serial.println("=== Parameter Indices Mapping ===");
-// for (int i = 0; i < 16; i++) {
-//   Serial.print("Encoder ");
-//   Serial.print(i + 1);
-//   Serial.print(" → parameterIndices[");
-//   Serial.print(i);
-//   Serial.print("] = ");
-//   Serial.println(parameterIndices[i]);
-// }
-
-// for (int i = 0; i < 16; i++) {
-//   int pIndex = parameterIndices[i];
-//   if (pIndex >= 0) {
-//     auto& param = getSubSection()->getParameters()[pIndex];
-//     Serial.print("Param ");
-//     Serial.print(pIndex);
-//     Serial.print(": name=");
-//     Serial.print(param.getName().c_str());
-//     Serial.print(" number=");
-//     Serial.print(param.getNumber());
-//     Serial.print(" type=");
-//     Serial.println(param.getType());
-//   }
-// }
-
   displayActivePage();
   displayParameters();
 }
@@ -204,7 +179,8 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           msb = synthesizer->getParameterL(parameter.getNumber(0));
           lsb = synthesizer->getParameterL(parameter.getNumber(1));
         }
-        int combined = (msb << 7) + lsb;
+
+        int combined = ((int)msb << 7) | (lsb & 0x7F);
         currentValue = combined;
         break;
       }
@@ -272,8 +248,9 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
     switch (parameter.getType()) {
       case PERFORMANCE_CTRL:
         {
-          int msb = newValue >> 7;
-          int lsb = newValue & 127;
+          int msb = (newValue >> 7) & 0x7F;
+          int lsb = newValue & 0x7F;
+
           if (!lowerMode) {
             synthesizer->setParameterU(parameter.getNumber(0), msb);
             synthesizer->setParameterU(parameter.getNumber(1), lsb);
@@ -292,9 +269,9 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           int value;
           if (!lowerMode) {
             value = synthesizer->getParameterU(parameter.getNumber());
-              if (keyboardMode == WHOLE) {
-                value = synthesizer->getParameterL(parameter.getNumber());
-              }
+            if (keyboardMode == WHOLE) {
+              value = synthesizer->getParameterL(parameter.getNumber());
+            }
           } else {
             value = synthesizer->getParameterL(parameter.getNumber());
           }
@@ -310,26 +287,47 @@ void ParameterController::handleParameterChange(int index, bool clockwise, int s
           break;
         }
       default:
-        if (!lowerMode) {
-          synthesizer->setParameterU(parameter.getNumber(subIndex), newValue);
-          if (keyboardMode == WHOLE) {
-            synthesizer->setParameterL(parameter.getNumber(subIndex), newValue);
+        {
+          int paramNumber = parameter.getNumber(subIndex);
+
+          if (inPerformanceMode && paramNumber >= 480 && paramNumber <= 504) {
+            // Update currentPatchData locally so the display shows changes
+            synthesizer->getCurrentPatchData()[paramNumber] = newValue;
+
+            // Also update currentPerformance.name
+            int nameIndex = paramNumber - 480;
+            if (nameIndex < 16) {  // 16 chars max
+              currentPerformance.name[nameIndex] = (char)newValue;
+            }
+            if (nameIndex == 15) {
+              currentPerformance.name[15] = '\0';
+            }
+          } else {
+            // Normal operation for real synth parameters
+            if (!lowerMode) {
+              synthesizer->setParameterU(paramNumber, newValue);
+              if (keyboardMode == WHOLE) {
+                synthesizer->setParameterL(paramNumber, newValue);
+              }
+            } else {
+              synthesizer->setParameterL(paramNumber, newValue);
+            }
           }
-        } else {
-          synthesizer->setParameterL(parameter.getNumber(subIndex), newValue);
+          break;
         }
     }
+    // === PERFORMANCE MODE NAME EDIT HOOK ===
+    int paramNumber = parameter.getNumber(subIndex);
+    if (inPerformanceMode && paramNumber >= 480 && paramNumber < 480 + 16) {
+      int nameIndex = paramNumber - 480;
+      if (nameIndex < 15) {
+        currentPerformance.name[nameIndex] = (char)newValue;
+      }
+      if (nameIndex == 15) {
+        currentPerformance.name[15] = '\0';  // Ensure null termination
+      }
+    }
   }
-
-// Serial.print("Param ");
-// Serial.print(parameter.getName().c_str());
-// Serial.print(" [");
-// Serial.print(parameter.getNumber(subIndex));
-// Serial.print("] changed from ");
-// Serial.print(currentValue);
-// Serial.print(" to ");
-// Serial.println(newValue);
-
 }
 
 void ParameterController::displayTwinParameters(int index1, int index2, int displayNumber) {
@@ -415,9 +413,9 @@ string ParameterController::getDisplayValue(int parameterIndex) {
             msb = synthesizer->getParameterL(parameter.getNumber(0));
             lsb = synthesizer->getParameterL(parameter.getNumber(1));
           }
-          int combined = (msb << 7) + lsb;
 
-          value = (int)combined;
+          int combined = ((int)msb << 7) | (lsb & 0x7F);
+          value = combined;
 
           break;
         }

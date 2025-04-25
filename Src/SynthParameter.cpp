@@ -21,7 +21,7 @@ uint8_t SynthParameter::getBitNumber() const {
 }
 
 uint8_t SynthParameter::getBitNumber(int index) const {
-    if (index < _bitNumbers.size()) {
+    if (index < static_cast<int>(_bitNumbers.size())) {
         return _bitNumbers[index];
     }
 
@@ -29,16 +29,17 @@ uint8_t SynthParameter::getBitNumber(int index) const {
 }
 
 int SynthParameter::getNumber(int index) const {
-    if (_numbers.empty()) return -1;
-    if (index < _numbers.size()) return _numbers[index];
-    return _numbers[0];
+    if (_numbers.empty()) return -1;  // No numbers at all
+    if (index < static_cast<int>(_numbers.size()))
+        return _numbers[index];       // Valid index
+    return _numbers[0];               // Fallback
 }
 
-uint8_t SynthParameter::getMin() const {
+int SynthParameter::getMin() const {
     return _min;
 }
 
-uint8_t SynthParameter::getMax() const {
+int SynthParameter::getMax() const {
     return _max;
 }
 

@@ -284,7 +284,7 @@ FLASHMEM static const char sequencerStep16[] = "Step 16";
 // External Controls
 FLASHMEM static const char labelExternalCtrls[] = "External Ctrls";
 FLASHMEM static const char extPitchTemperature[] = "Pitch Temperature";
-FLASHMEM static const char extPWMTemperature[] = "PWM temperature";
+FLASHMEM static const char extPWMTemperature[] = "PWM Temperature";
 FLASHMEM static const char extPitchCV1[] = "Pitch CV-1";
 FLASHMEM static const char extPitchCV2[] = "Pitch CV-2";
 FLASHMEM static const char extPWMCV1[] = "PWM CV-1";

@@ -125,8 +125,8 @@ Button saveButton = Button(&mcp3, GPB5, SAVE_BUTTON, &mainButtonChanged);
 Button escButton = Button(&mcp3, GPB3, ESC_BUTTON, &mainButtonChanged);
 Button lowerButton = Button(&mcp3, GPB4, LOWER_BUTTON, &mainButtonChanged);
 Button modeButton = Button(&mcp3, GPB7, MODE_BUTTON, &mainButtonChanged);
-Button perfButton = Button(&mcp3, GPB2, PERF_BUTTON, &mainButtonChanged);
-Button menuButton = Button(&mcp3, GPB6, MENU_BUTTON, &mainButtonChanged);
+Button perfButton = Button(&mcp3, GPB6, PERF_BUTTON, &mainButtonChanged);
+Button menuButton = Button(&mcp3, GPB2, MENU_BUTTON, &mainButtonChanged);
 
 
 EXTMEM Button *mainButtons[] = {

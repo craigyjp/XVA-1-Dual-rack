@@ -751,21 +751,29 @@ Section SectionFactory::createExternalControlsSection() {
 
 Section SectionFactory::createPerformanceControlsSection() {
   return Section(labelPerfControls)
-    .addParameter(SynthParameter(perfControls70).performanceControlType(400, 401))
+    .addParameter(SynthParameter(perfControls70)
+      .performanceControlType(400, 401).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls71).performanceControlType(402, 403))
+    .addParameter(SynthParameter(perfControls71)
+      .performanceControlType(402, 403).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls72).performanceControlType(404, 405))
+    .addParameter(SynthParameter(perfControls72)
+      .performanceControlType(404, 405).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls73).performanceControlType(406, 407))
+    .addParameter(SynthParameter(perfControls73)
+      .performanceControlType(406, 407).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls74).performanceControlType(408, 409))
+    .addParameter(SynthParameter(perfControls74)
+      .performanceControlType(408, 409).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls75).performanceControlType(410, 411))
+    .addParameter(SynthParameter(perfControls75)
+      .performanceControlType(410, 411).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls76).performanceControlType(412, 413))
+    .addParameter(SynthParameter(perfControls76)
+      .performanceControlType(412, 413).min(1).max(511))
     .addParameter(SynthParameter(""))
-    .addParameter(SynthParameter(perfControls77).performanceControlType(414, 415));
+    .addParameter(SynthParameter(perfControls77)
+      .performanceControlType(414, 415).min(1).max(511));
 }
 
 Section SectionFactory::createMIDIModSection() {

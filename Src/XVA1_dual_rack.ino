@@ -9,10 +9,40 @@
 #include "Button.h"
 #include "Hardware.h"
 #include <MIDI.h>
-#include <ShiftRegister74HC595.h>
+#include <RoxMux.h>
 #include "global.h"
+#include "Performance.h"
+#include "Synthesizer.h"
 #include <EEPROM.h>
 #include <Encoder.h>
+
+unsigned long saveButtonPressTime = 0;
+bool savePerformanceHeldHandled = false;
+bool savingPerformanceMode = false;
+
+enum MenuOption {
+  MENU_MIDI_CHANNEL,
+  MENU_SPLIT_TRANSPOSE,
+  MENU_OPTION_COUNT
+};
+
+const char *menuLabels[MENU_OPTION_COUNT] = {
+  "MIDI Channel",
+  "Split Transpose"
+};
+
+int midiChannel = 1;        // 1–16
+int secondmidiChannel = 2;  // 1–16
+
+
+enum MenuState {
+  INACTIVE,
+  SELECTING,
+  EDITING
+};
+
+MenuState menuState = INACTIVE;
+int currentMenuIndex = 0;
 
 /* function prototypes */
 
@@ -44,7 +74,14 @@ void readMainRotaryEncoder();
 
 int getEncoderSpeed(int id);
 
-ShiftRegister74HC595<1> srpanel(28, 29, 30);
+#define SRP_TOTAL 1
+Rox74HC595<SRP_TOTAL> srpanel;
+
+// pins for 74HC595
+#define LED_DATA 28   // pin 14 on 74HC595 (DATA)
+#define LED_CLK 29    // pin 11 on 74HC595 (CLK)
+#define LED_LATCH 30  // pin 12 on 74HC595 (LATCH)
+#define LED_PWM -1    // pin 13 on 74HC595
 
 void setup() {
   Serial.begin(115200);
@@ -53,6 +90,8 @@ void setup() {
   // } else {
   //   Serial.println("SD card ready.");
   // }
+
+  srpanel.begin(LED_DATA, LED_LATCH, LED_CLK, LED_PWM);
 
   // pullup i2c pins
   pinMode(18, INPUT_PULLUP);
@@ -85,6 +124,7 @@ void setup() {
   MIDI8.turnThruOn(midi::Thru::Mode::Off);
 
   loadSplitPointFromEEPROM();
+  loadGlobalSettings();
 
   Wire.begin();
   Wire.setClock(100000);  // Slow down I2C to 100kHz
@@ -112,8 +152,10 @@ void setup() {
   initOLEDDisplays();
   initButtons();
 
-  srpanel.set(UPPER_LED, HIGH);
-  srpanel.set(LOWER_LED, LOW);
+  srpanel.writePin(UPPER_LED, HIGH);
+  srpanel.writePin(LOWER_LED, LOW);
+  srpanel.writePin(PATCH_LED, HIGH);
+  srpanel.writePin(PERF_LED, LOW);
 
   synthesizer.selectPatchU(1);
   synthesizer.selectPatchL(1);
@@ -127,7 +169,8 @@ void loop() {
   pollAllMCPs();
 
   readMainRotaryEncoder();
-
+  readMainRotaryButton();
+  srpanel.update();         // update all the LEDs in the buttons
   MIDI.read();
   usbMIDI.read();
 }
@@ -155,11 +198,23 @@ void readMainRotaryEncoder() {
 }
 
 void myProgramChange(uint8_t channel, uint8_t value) {
-
   int patchNum = value + 1;  // MIDI programs 0–127 → patches 1–128
 
+  // === PERFORMANCE MODE ===
+  if (inPerformanceMode) {
+    if (channel == midiChannel) {
+      if (value >= 0 && value < 128) {
+        performanceIndex = value;
+        loadPerformance(performanceIndex);
+        displayPerformanceInfo();
+      }
+      return;
+    }
+  }
+
+  // === PATCH MODE ===
   if (keyboardMode == WHOLE) {
-    if (channel == 1) {
+    if (channel == midiChannel) {
       // WHOLE: Load upper, mirror to lower
       currentPatchNumberU = patchNum;
       synthesizer.selectPatchU(currentPatchNumberU);
@@ -167,13 +222,12 @@ void myProgramChange(uint8_t channel, uint8_t value) {
       synthesizer.setAllParameterL(currentPatchNumberU);
       suppressLowerDisplay = false;
     }
-  }
-
-  else {  // DUAL or SPLIT
-    if (channel == 1) {
+  } else {
+    // DUAL or SPLIT
+    if (channel == midiChannel) {
       currentPatchNumberU = patchNum;
       synthesizer.selectPatchU(currentPatchNumberU);
-    } else if (channel == 2) {
+    } else if (channel == (secondmidiChannel)) {
       currentPatchNumberL = patchNum;
       synthesizer.selectPatchL(currentPatchNumberL);
     }
@@ -186,46 +240,58 @@ void myProgramChange(uint8_t channel, uint8_t value) {
 }
 
 void myControlChange(uint8_t channel, uint8_t controller, uint8_t value) {
-  MIDI6.sendControlChange(controller, value, channel);
-  MIDI8.sendControlChange(controller, value, channel);
+  if (channel == midiChannel) {
+    MIDI6.sendControlChange(controller, value, channel);
+    MIDI8.sendControlChange(controller, value, channel);
+  }
 }
 
 void myAfterTouch(uint8_t channel, uint8_t value) {
-  switch (keyboardMode) {
-    case WHOLE:
-    case DUAL:
-      MIDI6.sendAfterTouch(value, channel);
-      MIDI8.sendAfterTouch(value, channel);
-      break;
+  if (channel == midiChannel) {
+    switch (keyboardMode) {
+      case WHOLE:
+      case DUAL:
+        MIDI6.sendAfterTouch(value, channel);
+        MIDI8.sendAfterTouch(value, channel);
+        break;
 
-    case SPLIT:
-      MIDI6.sendAfterTouch(value, channel);
-      MIDI8.sendAfterTouch(value, channel);
-      break;
+      case SPLIT:
+        MIDI6.sendAfterTouch(value, channel);
+        MIDI8.sendAfterTouch(value, channel);
+        break;
+    }
   }
 }
 
 void DinHandlePitchBend(uint8_t channel, int pitch) {
-  switch (keyboardMode) {
-    case WHOLE:
-    case DUAL:
-      MIDI6.sendPitchBend(pitch, channel);
-      MIDI8.sendPitchBend(pitch, channel);
-      break;
 
-    case SPLIT:
-      MIDI6.sendPitchBend(pitch, channel);
-      MIDI8.sendPitchBend(pitch, channel);
-      break;
+  if (channel == midiChannel) {
+    switch (keyboardMode) {
+      case WHOLE:
+      case DUAL:
+        MIDI6.sendPitchBend(pitch, channel);
+        MIDI8.sendPitchBend(pitch, channel);
+        break;
+
+      case SPLIT:
+        MIDI6.sendPitchBend(pitch, channel);
+        MIDI8.sendPitchBend(pitch, channel);
+        break;
+    }
   }
 }
 
 void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
+  if (channel != midiChannel) return;
 
   if (settingSplitPoint) {
     splitPoint = note;
     saveSplitPointToEEPROM(splitPoint);
     settingSplitPoint = false;
+
+    if (inPerformanceMode) {
+      currentPerformance.splitPoint = splitPoint;
+    }
 
     // Flash confirmation
     tft.fillRect(0, 0, 320, 26, TFT_GREEN);
@@ -234,7 +300,6 @@ void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
     tft.setTextDatum(1);
     tft.drawString("Split Set: " + String(noteName(note)), 153, 6);
 
-    // Wait a moment then restore header
     delay(1000);
     showModeLabel();
     return;
@@ -255,12 +320,15 @@ void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
     case DUAL:
       MIDI6.sendNoteOn(note, velocity, channel);
       MIDI8.sendNoteOn(note, velocity, channel);
-      noteTarget[note] = 0;  // both received
+      noteTarget[note] = 0;  // both
       break;
 
     case SPLIT:
       if (note < splitPoint) {
-        MIDI6.sendNoteOn(note, velocity, channel);
+        int transposed = note + splitTranspose;
+        if (transposed < 0) transposed = 0;
+        if (transposed > 127) transposed = 127;
+        MIDI6.sendNoteOn(transposed, velocity, channel);
         noteTarget[note] = 6;
       } else {
         MIDI8.sendNoteOn(note, velocity, channel);
@@ -271,17 +339,17 @@ void myNoteOn(uint8_t channel, uint8_t note, uint8_t velocity) {
 }
 
 void myNoteOff(uint8_t channel, uint8_t note, uint8_t velocity) {
+  if (channel != midiChannel) return;
+
   uint8_t target = noteTarget[note];
 
   switch (keyboardMode) {
     case WHOLE:
-    case SPLIT:
       if (target == 6) {
         MIDI6.sendNoteOff(note, velocity, channel);
       } else if (target == 8) {
         MIDI8.sendNoteOff(note, velocity, channel);
       } else {
-        // fallback: send to both
         MIDI6.sendNoteOff(note, velocity, channel);
         MIDI8.sendNoteOff(note, velocity, channel);
       }
@@ -291,62 +359,22 @@ void myNoteOff(uint8_t channel, uint8_t note, uint8_t velocity) {
       MIDI6.sendNoteOff(note, velocity, channel);
       MIDI8.sendNoteOff(note, velocity, channel);
       break;
+
+    case SPLIT:
+      if (target == 6) {
+        int transposed = note + splitTranspose;
+        if (transposed < 0) transposed = 0;
+        if (transposed > 127) transposed = 127;
+        MIDI6.sendNoteOff(transposed, velocity, channel);
+      } else if (target == 8) {
+        MIDI8.sendNoteOff(note, velocity, channel);
+      }
+      break;
   }
 
-  // Clear the note tracking
-  noteTarget[note] = 0;
+  noteTarget[note] = 0;  // Clear tracking
 }
 
-/**
-   The interrupt callback will just signal that an interrupt has occurred.
-   All work will be done from the main loop, to avoid watchdog errors
-*/
-
-// void loadPerformance(int index) {
-//   char path[32];
-//   snprintf(path, sizeof(path), "/perf/P%03d.dat", index);
-
-//   File file = SD.open(path);
-//   if (file && file.read((uint8_t*)&currentPerformance, sizeof(Performance)) == sizeof(Performance)) {
-//     currentPatchNumberU = currentPerformance.upperPatchNo;
-//     currentPatchNumberL = currentPerformance.lowerPatchNo;
-//     keyboardMode = (KeyboardMode)currentPerformance.keyboardMode;
-//     splitPoint = currentPerformance.splitPoint;
-
-//     synthesizer.selectPatchU(currentPatchNumberU);
-//     synthesizer.selectPatchL(currentPatchNumberL);
-
-//     if (keyboardMode == WHOLE) {
-//       suppressLowerDisplay = true;
-//       synthesizer.setAllParameterL(currentPatchNumberU);
-//       suppressLowerDisplay = false;
-//     }
-
-//     Serial.printf("[PERF] Loaded: %s (U:%d L:%d)\n",
-//                   currentPerformance.name,
-//                   currentPatchNumberU,
-//                   currentPatchNumberL);
-//   }
-//   file.close();
-// }
-
-// void saveCurrentPerformance(int index) {
-//   Performance perf;
-//   perf.upperPatchNo = currentPatchNumberU;
-//   perf.lowerPatchNo = currentPatchNumberL;
-//   perf.keyboardMode = keyboardMode;
-//   perf.splitPoint = splitPoint;
-//   strncpy(perf.name, "New Performance", 17); // Replace with actual name editing later
-
-//   char path[32];
-//   snprintf(path, sizeof(path), "/perf/P%03d.dat", index);
-//   File file = SD.open(path, FILE_WRITE);
-//   if (file) {
-//     file.write((uint8_t*)&perf, sizeof(Performance));
-//     file.close();
-//     Serial.println("[PERF] Saved.");
-//   }
-// }
 
 void rotaryEncoderChanged(bool clockwise, int id) {
   int speed = getEncoderSpeed(id);
@@ -403,12 +431,181 @@ void initButtons() {
   for (auto &button : allButtons) {
     button->begin();
   }
-
+  Serial.println("Setting encoder button as input");
   pinMode(MAIN_ROTARY_BTN_PIN, INPUT_PULLUP);
 }
 
+void displayPerformanceInfo() {
+  tft.fillScreen(TFT_BLACK);
+
+  // Header
+  tft.fillRect(0, 0, 320, 26, TFT_CYAN);
+  tft.setTextColor(TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setTextDatum(1);
+  //tft.drawString("PERF " + String(performanceIndex + 1) + ": " + String(currentPerformance.name), 153, 6);
+  String perfName = String(currentPerformance.name);
+  if (perfName.length() > 16) perfName = perfName.substring(0, 16);
+
+  String header = "P" + String(performanceIndex + 1) + ": " + perfName;
+  tft.drawString(header, 153, 6);  // centered
+  tft.setTextDatum(1);             // Reset datum to left for rest of UI
+
+  // Labels
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+  tft.drawString("Upper", 60, 40);
+  tft.drawString("Patch", 60, 70);
+
+  if (currentPerformance.mode != WHOLE) {
+    tft.drawString("Lower", 60, 140);
+    tft.drawString("Patch", 60, 170);
+  }
+
+  // Divider
+  tft.fillRect(0, 128, 320, 2, MY_ORANGE);
+
+  // Numbers
+  tft.setTextSize(5);
+  tft.setTextColor(TFT_BLACK);
+  tft.drawNumber(-1, 180, 50);  // Clear
+  tft.setTextColor(MY_ORANGE, TFT_BLACK);
+  tft.drawNumber(currentPerformance.upperPatchNo, 180, 50);
+
+  if (currentPerformance.mode != WHOLE) {
+    tft.setTextSize(5);
+    tft.setTextColor(TFT_BLACK);
+    tft.drawNumber(-1, 180, 150);  // Clear
+    tft.setTextColor(MY_ORANGE, TFT_BLACK);
+    tft.drawNumber(currentPerformance.lowerPatchNo, 180, 150);
+  }
+
+  // Upper patch name
+  String upperPatchName = String(synthesizer.getPatchNameU().c_str());
+  rtrimArduino(upperPatchName, ' ');
+  tft.setTextSize(2);
+  tft.setTextDatum(1);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.fillRect(0, 94, 320, 26, TFT_BLACK);
+  tft.drawString(upperPatchName, 119, 100);
+
+  // Lower patch name
+  tft.fillRect(0, 191, 320, 26, TFT_BLACK);
+  if (currentPerformance.mode != WHOLE) {
+    String lowerPatchName = String(synthesizer.getPatchNameL().c_str());
+    rtrimArduino(lowerPatchName, ' ');
+    tft.drawString(lowerPatchName, 119, 200);
+  }
+
+  // Draw "Dual" or "Split" label next to "Lower" in DUAL/SPLIT mode
+  if (currentPerformance.mode == DUAL || currentPerformance.mode == SPLIT) {
+    tft.setTextSize(2);
+    tft.setTextColor(MY_ORANGE, TFT_BLACK);  // Match highlight style
+    tft.setTextDatum(0);
+
+    const char *modeLabel = (currentPerformance.mode == DUAL) ? "Dual" : "Split";
+    tft.drawString(modeLabel, 240, 40);  // same line as "Lower"
+  }
+  if (currentPerformance.mode == SPLIT) {
+    tft.setTextSize(2);
+    tft.setTextColor(MY_ORANGE, TFT_BLACK);  // Match highlight style
+    tft.setTextDatum(0);
+
+    const char *xposeLabel = "Xpose";
+    tft.drawString(xposeLabel, 240, 140);  // same line as "Lower"
+    // Transpose amount
+    String transposeStr = (currentPerformance.splitTranspose >= 0 ? "+" : "") + String(currentPerformance.splitTranspose);
+    tft.drawString(transposeStr, 240, 170);
+  }
+
+  // In SPLIT mode, show split point under "Patch" line
+  if (currentPerformance.mode == SPLIT) {
+    // Split point
+    String splitText = String(noteName(currentPerformance.splitPoint));
+    tft.setTextSize(2);
+    tft.setTextColor(MY_ORANGE, TFT_BLACK);
+    tft.setTextDatum(0);
+    tft.drawString(splitText, 240, 70);  // inline with "Patch"
+  }
+}
+
 void handleMainEncoder(bool clockwise, int speed) {
-  // Get current patch number
+
+  if (menuState == SELECTING) {
+    currentMenuIndex += (clockwise ? 1 : -1);
+    if (currentMenuIndex < 0) currentMenuIndex = MENU_OPTION_COUNT - 1;
+    if (currentMenuIndex >= MENU_OPTION_COUNT) currentMenuIndex = 0;
+
+    displayMenu();
+    return;
+  }
+
+  if (menuState == EDITING) {
+    switch (currentMenuIndex) {
+      case MENU_MIDI_CHANNEL:
+        midiChannel += (clockwise ? 1 : -1);
+        if (midiChannel < 1) midiChannel = 16;
+        if (midiChannel > 16) midiChannel = 1;
+        break;
+
+      case MENU_SPLIT_TRANSPOSE:
+        {
+          int oldValue = splitTranspose;
+          splitTranspose += (clockwise ? 1 : -1);
+          if (splitTranspose < -24) splitTranspose = -24;
+          if (splitTranspose > 24) splitTranspose = 24;
+
+          if (splitTranspose != oldValue) {
+            splitTransposeChanged = true;
+          }
+          break;
+        }
+    }
+
+    displayMenu();  // reuse UI to show current value
+    return;
+  }
+
+  //  Performance Scroll Mode
+  if (inPerformanceMode && !savingPerformanceMode) {
+    int oldIndex = performanceIndex;
+
+    if (clockwise) {
+      performanceIndex += speed;
+      if (performanceIndex > 127) performanceIndex = 127;
+    } else {
+      performanceIndex -= speed;
+      if (performanceIndex < 0) performanceIndex = 0;
+    }
+
+    if (performanceIndex != oldIndex) {
+      loadPerformance(performanceIndex);
+      displayPerformanceInfo();  // replaces displayPatchInfo()
+    }
+
+    return;
+  }
+
+  // === Performance Save Mode (already implemented) ===
+  if (savingPerformanceMode) {
+    int oldIndex = performanceIndex;
+
+    if (clockwise) {
+      performanceIndex += speed;
+      if (performanceIndex > 127) performanceIndex = 127;
+    } else {
+      performanceIndex -= speed;
+      if (performanceIndex < 0) performanceIndex = 0;
+    }
+
+    if (performanceIndex != oldIndex) {
+      showPerformanceIndexUI(performanceIndex);  // simple header
+    }
+
+    return;
+  }
+
+  // === Normal Patch Mode Encoder Logic ===
   if (!lowerMode) {
     currentPatchNumber = synthesizer.getPatchNumberU();
   } else {
@@ -417,7 +614,6 @@ void handleMainEncoder(bool clockwise, int speed) {
 
   int oldValue = currentPatchNumber;
 
-  // Adjust patch number based on encoder direction
   if (clockwise) {
     if (currentPatchNumber < 128) {
       currentPatchNumber += speed;
@@ -430,16 +626,13 @@ void handleMainEncoder(bool clockwise, int speed) {
     }
   }
 
-  // Save the new patch number to the correct layer
   if (!lowerMode) {
     currentPatchNumberU = currentPatchNumber;
   } else {
     currentPatchNumberL = currentPatchNumber;
   }
 
-
   if (!saveMode) {
-
     if (currentPatchNumber != oldValue) {
       if (!lowerMode) {
         synthesizer.selectPatchU(currentPatchNumberU);
@@ -452,10 +645,9 @@ void handleMainEncoder(bool clockwise, int speed) {
       } else {
         synthesizer.selectPatchL(currentPatchNumberL);
       }
-      // Send CC123 to both synths to clear stuck notes
-      MIDI6.sendControlChange(123, 127, 1);  // Lower synth
-      MIDI8.sendControlChange(123, 127, 1);  // Upper synth
 
+      MIDI6.sendControlChange(123, 127, 1);
+      MIDI8.sendControlChange(123, 127, 1);
       clearShortcut();
       parameterController.setDefaultSection();
       displayPatchInfo();
@@ -463,7 +655,6 @@ void handleMainEncoder(bool clockwise, int speed) {
   }
 
   if (saveMode) {
-
     if (currentPatchNumber != oldValue) {
       if (!lowerMode) {
         synthesizer.changePatchU(currentPatchNumberU);
@@ -480,6 +671,14 @@ void handleMainEncoder(bool clockwise, int speed) {
       displayPatchInfo();
     }
   }
+}
+
+void showPerformanceIndexUI(int index) {
+  tft.fillRect(0, 0, 320, 26, TFT_BLUE);  // header area
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+  tft.setTextDatum(1);
+  tft.drawString("Save to Perf " + String(index + 1), 153, 6);
 }
 
 void displayPatchInfo() {
@@ -499,6 +698,12 @@ void rtrim(std::string &s, char c) {
     p++;
 
   s.erase(p, s.end());
+}
+
+void rtrimArduino(String &s, char c) {
+  while (s.endsWith(String(c))) {
+    s.remove(s.length() - 1);
+  }
 }
 
 void sendPatchToLowerOnly(int currentPatchNumber) {
@@ -636,24 +841,50 @@ void mainButtonChanged(Button *btn, bool released) {
 
   switch (btn->id) {
 
-      // case PERF_BUTTON:
-      //   if (!released) {
-      //     inPerformanceMode = !inPerformanceMode;
+    case MENU_BUTTON:
+      if (!released) {
+        if (menuState == INACTIVE) {
+          menuState = SELECTING;
+          currentMenuIndex = 0;
+          srpanel.writePin(MENU_LED, HIGH);
+          displayMenu();
+        }
+      }
+      break;
 
-      //     if (inPerformanceMode) {
-      //       srpanel.set(PERF_LED, HIGH);
-      //       srpanel.set(PATCH_LED, LOW);
-      //       loadPerformance(performanceIndex);
-      //     } else {
-      //       srpanel.set(PERF_LED, LOW);
-      //       srpanel.set(PATCH_LED, HIGH);
-      //       synthesizer.selectPatchU(currentPatchNumberU);
-      //       synthesizer.selectPatchL(currentPatchNumberL);
-      //     }
+    case PERF_BUTTON:
+      if (!released) {
+        inPerformanceMode = !inPerformanceMode;
 
-      //     displayPatchInfo();
-      //   }
-      //   break;
+        if (inPerformanceMode) {
+          // Save current mode before switching to performance mode
+          previousKeyboardMode = keyboardMode;
+
+          srpanel.writePin(PERF_LED, HIGH);
+          srpanel.writePin(PATCH_LED, LOW);
+          loadPerformance(performanceIndex);
+          displayPerformanceInfo();  // new screen for performances
+        } else {
+          srpanel.writePin(PERF_LED, LOW);
+          srpanel.writePin(PATCH_LED, HIGH);
+
+          tft.fillScreen(TFT_BLACK);
+
+          // Restore previous patches
+          synthesizer.selectPatchU(currentPatchNumberU);
+          synthesizer.selectPatchL(currentPatchNumberL);
+
+          // Restore previous keyboard mode (Whole/Dual/Split)
+          keyboardMode = previousKeyboardMode;
+          if (keyboardMode == WHOLE) {
+            suppressLowerDisplay = true;
+            synthesizer.setAllParameterL(currentPatchNumberU);
+            suppressLowerDisplay = false;
+          }
+          displayPatchInfo();
+        }
+      }
+      break;
 
     case MODE_BUTTON:
       if (!released) {
@@ -702,8 +933,8 @@ void mainButtonChanged(Button *btn, bool released) {
               // Force exit lower mode
               lowerMode = false;
               lowerButtonPushed = false;
-              srpanel.set(LOWER_LED, LOW);
-              srpanel.set(UPPER_LED, HIGH);
+              srpanel.writePin(LOWER_LED, LOW);
+              srpanel.writePin(UPPER_LED, HIGH);
 
               // Load upper patch and send to lower synth
               synthesizer.selectPatchU(currentPatchNumberU);
@@ -729,8 +960,8 @@ void mainButtonChanged(Button *btn, bool released) {
 
       if (lowerButtonPushed) {
         lowerMode = true;
-        srpanel.set(LOWER_LED, HIGH);  // Activate lower LED
-        srpanel.set(UPPER_LED, LOW);   // Deactivate upper LED
+        srpanel.writePin(LOWER_LED, HIGH);  // Activate lower LED
+        srpanel.writePin(UPPER_LED, LOW);   // Deactivate upper LED
 
         if (!saveMode) {
           synthesizer.selectPatchL(currentPatchNumberL);
@@ -738,8 +969,8 @@ void mainButtonChanged(Button *btn, bool released) {
         }
       } else {
         lowerMode = false;
-        srpanel.set(LOWER_LED, LOW);   // Deactivate lower LED
-        srpanel.set(UPPER_LED, HIGH);  // Activate upper LED
+        srpanel.writePin(LOWER_LED, LOW);   // Deactivate lower LED
+        srpanel.writePin(UPPER_LED, HIGH);  // Activate upper LED
 
         if (!saveMode) {
           synthesizer.selectPatchU(currentPatchNumberU);
@@ -750,47 +981,142 @@ void mainButtonChanged(Button *btn, bool released) {
 
     case SAVE_BUTTON:
       if (!released) {
-        saveMode = !saveMode;
-        if (saveMode) {
-          if (activeShortcut > 0) {
-            parameterController.clearScreen();
-            clearShortcut();
+        saveButtonPressTime = millis();
+        savePerformanceHeldHandled = false;
+      } else {
+        unsigned long heldTime = millis() - saveButtonPressTime;
+
+        // === Long press → enter save-to-slot mode (works in patch & performance mode) ===
+        if (heldTime >= 500 && !savePerformanceHeldHandled && !savingPerformanceMode) {
+          Serial.println(F(">>> Entering Performance Save Mode"));
+          savePerformanceHeldHandled = true;
+          savingPerformanceMode = true;
+
+          srpanel.writePin(SAVE_LED, HIGH);
+          parameterController.clearScreen();
+
+          tft.fillRect(0, 0, 320, 26, TFT_BLUE);
+          tft.setTextColor(TFT_WHITE);
+          tft.setTextSize(2);
+          tft.setTextDatum(1);
+          tft.drawString(inPerformanceMode ? "Save Performance" : "Select Slot to Save", 153, 6);
+
+          showPerformanceIndexUI(performanceIndex);
+        }
+
+        // === Short press → Save Patch (patch mode only) ===
+        else if (!inPerformanceMode && !savingPerformanceMode && heldTime < 500) {
+          Serial.println(F(">>> Short press: Save Patch"));
+
+          saveMode = !saveMode;
+
+          if (saveMode) {
+            if (activeShortcut > 0) {
+              parameterController.clearScreen();
+              clearShortcut();
+              displayPatchInfo();
+            }
+            srpanel.writePin(SAVE_LED, HIGH);
+            tft.fillRect(0, 0, 320, 26, TFT_VIOLET);
+            tft.setTextColor(TFT_WHITE);
+            tft.setTextSize(2);
+            tft.setTextDatum(1);
+            tft.drawString("Select Location", 153, 6);
+            parameterController.setDefaultSection();
+          } else {
+            tft.setTextSize(2);
+            tft.setTextDatum(1);
+            tft.fillRect(0, 0, 320, 26, TFT_RED);
+            tft.setTextColor(TFT_WHITE);
+            tft.drawString("Writing Patch", 153, 6);
+
+            if (!lowerMode) {
+              currentPatchNumber = synthesizer.getPatchNumberU();
+              synthesizer.setAllParameterU(currentPatchNumberU);
+              synthesizer.savePatchDataU(currentPatchNumberU);
+            } else {
+              currentPatchNumber = synthesizer.getPatchNumberL();
+              synthesizer.setAllParameterL(currentPatchNumberL);
+              synthesizer.savePatchDataL(currentPatchNumberL);
+            }
+
+            delay(1000);
+            displayPatchInfo();
+            showModeLabel();
+            srpanel.writePin(SAVE_LED, LOW);
+          }
+        }
+
+        // === Save to selected performance slot (both modes) ===
+        else if (savingPerformanceMode) {
+          Serial.println(F(">>> Confirming Save to Performance Slot"));
+
+          if (inPerformanceMode) {
+            Performance updated = {
+              .upperPatchNo = (uint8_t)currentPatchNumberU,
+              .lowerPatchNo = (uint8_t)currentPatchNumberL,
+              .mode = keyboardMode,
+              .splitPoint = splitPoint,
+              .splitTranspose = (int8_t)splitTranspose,
+            };
+            memcpy(updated.name, currentPerformance.name, sizeof(updated.name) - 1);
+            updated.name[sizeof(updated.name) - 1] = '\0';
+
+            savePerformance(performanceIndex, updated);
+            currentPerformance = updated;
+
+            tft.fillRect(0, 0, 320, 26, TFT_GREEN);
+            tft.setTextColor(TFT_BLACK);
+            tft.setTextSize(2);
+            tft.setTextDatum(1);
+            tft.drawString("Saved Performance", 153, 6);
+            delay(1000);
+            displayPerformanceInfo();
+          } else {
+            saveCurrentStateToPerformance();
+
+            tft.fillRect(0, 0, 320, 26, TFT_GREEN);
+            tft.setTextColor(TFT_BLACK);
+            tft.setTextSize(2);
+            tft.setTextDatum(1);
+            tft.drawString("Saved to Slot " + String(performanceIndex + 1), 153, 6);
+            delay(1000);
             displayPatchInfo();
           }
-          srpanel.set(SAVE_LED, HIGH);
-          tft.fillRect(0, 0, 320, 26, TFT_VIOLET);
-          tft.setTextColor(TFT_WHITE);
-          tft.setTextSize(2);
-          tft.setTextDatum(1);
-          tft.drawString("Select Location", 153, 6);
-          parameterController.setDefaultSection();
-        } else {
-          tft.setTextSize(2);
-          tft.setTextDatum(1);
-          tft.fillRect(0, 0, 320, 26, TFT_RED);
-          tft.setTextColor(TFT_WHITE);
-          tft.drawString("Writing Patch", 153, 6);
 
-          if (!lowerMode) {
-            currentPatchNumber = synthesizer.getPatchNumberU();
-            synthesizer.setAllParameterU(currentPatchNumberU);
-            synthesizer.savePatchDataU(currentPatchNumberU);
-          } else {
-            currentPatchNumber = synthesizer.getPatchNumberL();
-            synthesizer.setAllParameterL(currentPatchNumberL);
-            synthesizer.savePatchDataL(currentPatchNumberL);
-          }
-
-          delay(1000);
-          displayPatchInfo();
-          showModeLabel();
-          srpanel.set(SAVE_LED, LOW);
+          savingPerformanceMode = false;
+          srpanel.writePin(SAVE_LED, LOW);
         }
       }
       break;
 
     case ESC_BUTTON:
       if (!released) {
+
+        if (menuState == EDITING) {
+          // Exit setting edit, return to menu list
+          menuState = SELECTING;
+          displayMenu();
+          return;
+        }
+
+        if (menuState == SELECTING) {
+          // Exit the whole menu
+          menuState = INACTIVE;
+          srpanel.writePin(MENU_LED, LOW);
+          tft.fillScreen(TFT_BLACK);  // clear menu UI
+          if (inPerformanceMode) {
+            if (splitTransposeChanged) {
+              currentPerformance.splitTranspose = splitTranspose;
+            }
+            splitTransposeChanged = false;
+            displayPerformanceInfo();
+          } else {
+            displayPatchInfo();
+          }
+          return;
+        }
+
         if (activeShortcut > 0) {
           parameterController.clearScreen();
           clearShortcut();
@@ -803,12 +1129,28 @@ void mainButtonChanged(Button *btn, bool released) {
           parameterController.clearScreen();
           clearShortcut();
           displayPatchInfo();
-          srpanel.set(SAVE_LED, LOW);
+          srpanel.writePin(SAVE_LED, LOW);
+        }
+
+        if (savingPerformanceMode) {
+          savingPerformanceMode = false;
+          srpanel.writePin(SAVE_LED, LOW);
+          displayPatchInfo();
+          return;
         }
 
         parameterController.setDefaultSection();
       }
       break;
+  }
+}
+
+void flashLED(uint8_t led, int flashes, int intervalMs) {
+  for (int i = 0; i < flashes; i++) {
+    srpanel.writePin(led, LOW);
+    delay(intervalMs);
+    srpanel.writePin(led, HIGH);
+    delay(intervalMs);
   }
 }
 
@@ -825,16 +1167,16 @@ void showModeLabel() {
       tft.fillRect(0, 0, 320, 26, TFT_ORANGE);
       tft.setTextColor(TFT_BLACK);
       label = "Whole Mode";
-      srpanel.set(MODE_RED_LED, LOW);
-      srpanel.set(MODE_GREEN_LED, LOW);
+      srpanel.writePin(MODE_RED_LED, LOW);
+      srpanel.writePin(MODE_GREEN_LED, LOW);
       break;
 
     case DUAL:
       tft.fillRect(0, 0, 320, 26, TFT_RED);
       tft.setTextColor(TFT_WHITE);
       label = "Dual Mode";
-      srpanel.set(MODE_RED_LED, HIGH);
-      srpanel.set(MODE_GREEN_LED, LOW);
+      srpanel.writePin(MODE_RED_LED, HIGH);
+      srpanel.writePin(MODE_GREEN_LED, LOW);
       break;
 
     case SPLIT:
@@ -843,8 +1185,8 @@ void showModeLabel() {
       label = "Split Mode (";
       label += noteName(splitPoint);
       label += ")";
-      srpanel.set(MODE_RED_LED, LOW);
-      srpanel.set(MODE_GREEN_LED, HIGH);
+      srpanel.writePin(MODE_RED_LED, LOW);
+      srpanel.writePin(MODE_GREEN_LED, HIGH);
       break;
   }
 
@@ -858,15 +1200,88 @@ void clearShortcut() {
   }
 }
 
+void displayMenu() {
+  String label;
+  tft.fillRect(0, 0, 320, 240, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setTextDatum(1);  // Center text
+  tft.fillRect(0, 0, 320, 26, TFT_MAGENTA);
+  tft.setTextColor(TFT_BLACK);
+  label = "Setup Menu";
+  tft.drawString(label, 160, 6);  // Centered on screen
+
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(2);
+
+  for (int i = 0; i < MENU_OPTION_COUNT; i++) {
+    if (i == currentMenuIndex) {
+      tft.setTextColor(TFT_YELLOW);
+    } else {
+      tft.setTextColor(TFT_WHITE);
+    }
+
+    String line = String(menuLabels[i]) + ": ";
+
+    if (i == MENU_MIDI_CHANNEL) line += String(midiChannel);
+    if (i == MENU_SPLIT_TRANSPOSE) line += String(splitTranspose);
+
+    tft.drawString(line, 10, 40 + i * 30);
+  }
+}
+
 void readMainRotaryButton() {
   bool mainRotaryButtonState = (digitalRead(MAIN_ROTARY_BTN_PIN) == LOW);
   if (mainRotaryButtonState != mainRotaryButtonPushed) {
+    Serial.println("Encoder button pushed");
     mainRotaryButtonPushed = mainRotaryButtonState;
     mainRotaryButtonChanged(!mainRotaryButtonPushed);
   }
 }
 
 void rotaryButtonChanged(Button *btn, bool released) {
+  // You can handle the main encoder button here if you like
+}
+
+void mainRotaryButtonChanged(bool released) {
+  if (!released) return;  // Only act on button *release*
+
+  switch (menuState) {
+    case SELECTING:
+      menuState = EDITING;
+      displayMenu();
+      break;
+
+    case EDITING:
+      // Save current setting to EEPROM
+      switch (currentMenuIndex) {
+        case MENU_MIDI_CHANNEL:
+          EEPROM.update(EEPROM_ADDR_MIDI_CHANNEL, midiChannel);
+          break;
+
+        case MENU_SPLIT_TRANSPOSE:
+          EEPROM.update(EEPROM_ADDR_SPLIT_TRANSPOSE, splitTranspose);
+          break;
+      }
+
+      menuState = SELECTING;
+      displayMenu();
+      break;
+
+    case INACTIVE:
+    default:
+      // Do nothing
+      break;
+  }
+}
+
+void loadGlobalSettings() {
+  midiChannel = EEPROM.read(EEPROM_ADDR_MIDI_CHANNEL);
+  if (midiChannel < 1 || midiChannel > 16) midiChannel = 1;
+
+  splitTranspose = EEPROM.read(EEPROM_ADDR_SPLIT_TRANSPOSE);
+  if (splitTranspose > 127) splitTranspose = 0;  // handle signed wrap
+  if (splitTranspose > 24) splitTranspose = 24;
+  if (splitTranspose < -24) splitTranspose = 0;
 }
 
 void upOrDownButtonChanged(Button *btn, bool released) {
@@ -878,7 +1293,4 @@ void upOrDownButtonChanged(Button *btn, bool released) {
       parameterController.downButtonTapped();
     }
   }
-}
-
-void mainRotaryButtonChanged(bool released) {
 }

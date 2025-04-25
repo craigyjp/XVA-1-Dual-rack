@@ -1,6 +1,6 @@
 # Based on the previous dual XVA-1 keyboard which was never quite finished, I stripped guts from the keyboard to use in another project which left me with two XVA-1 boards, an editor based on a Teensy 3.6 and a 3 channel MIDI merger based on a Teensy 4.1.
 
-![Synth](Photos/Synth.jpg)
+![Synth](Photos/synth.jpg)
 
 Revisiting the XVA-1 project for a 3rd time, so last week I stole the UF-70 keyboard case housing from the XVA-1 project that I sort of completed 2 years ago. (Still needed work on dual functions). 
 
@@ -20,6 +20,6 @@ Setups are Whole mode, Dual mode and Split mode accessed by the MODE button, pre
 
 Performances can also be named upto 15 characters when in performance mode using the Naming Page
 
-![Synth](Photos/Synth1.jpg)
+![Synth](Photos/synth1.jpg)
 
-![Synth](Photos/Synth2.jpg)
+![Synth](Photos/synth2.jpg)

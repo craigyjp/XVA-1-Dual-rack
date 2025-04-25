@@ -18,6 +18,8 @@ Recently I added two more buttons and this gave me a MODE button and a PATCH/PER
 
 Setups are Whole mode, Dual mode and Split mode accessed by the MODE button, press and hold MODE for more than 500mS and you can press a key and set a split point that will be stored in memory and recalled on boot.
 
+The MENU button allows you to set the MIDI channel for the synth and a split Transpose so the lower patches can be transposed +/- 24 semitones and these are stored within performances.
+
 Performances can also be named upto 15 characters when in performance mode using the Naming Page
 
 ![Synth](Photos/synth1.jpg)

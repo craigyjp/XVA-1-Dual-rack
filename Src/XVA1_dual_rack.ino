@@ -170,7 +170,7 @@ void loop() {
 
   readMainRotaryEncoder();
   readMainRotaryButton();
-  srpanel.update();         // update all the LEDs in the buttons
+  srpanel.update();  // update all the LEDs in the buttons
   MIDI.read();
   usbMIDI.read();
 }
@@ -1187,9 +1187,18 @@ void showModeLabel() {
       label += ")";
       srpanel.writePin(MODE_RED_LED, LOW);
       srpanel.writePin(MODE_GREEN_LED, HIGH);
+
+      tft.setTextColor(MY_ORANGE);
+      const char *xposeLabel = "Xpose";
+      tft.drawString(xposeLabel, 270, 140);  // same line as "Lower"
+
+      String transposeStr = (splitTranspose >= 0 ? "+" : "") + String(splitTranspose);
+      tft.drawString(transposeStr, 270, 170);
+
       break;
   }
 
+  tft.setTextColor(TFT_BLACK);
   tft.drawString(label, 160, 6);  // Centered on screen
 }
 
